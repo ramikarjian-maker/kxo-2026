@@ -426,8 +426,20 @@ window.KXO_BOOT = function () {
     if (!lmap) return;
     var pts = Object.keys(PL).filter(function (k) { return mode === "all" || k !== "cabin"; }).map(function (k) { return [PL[k].lat, PL[k].lon]; });
     pts.push([K.HOME.lat, K.HOME.lon]);
-    lmap.fitBounds(pts, { padding: [28, 28] });
+    fitSized(lmap, pts, { padding: [28, 28] });
   }
+  // Leaflet picks max zoom when it fits bounds in a zero-size box (page drawn before layout, tab restored from background).
+  // Fit now if the map has a size; otherwise re-fit once it gets one.
+  function fitSized(m, pts, opts) {
+    var el = m.getContainer(), ok = function () { return el.isConnected && el.clientWidth > 0 && el.clientHeight > 0; };
+    m.fitBounds(pts, opts);
+    if (ok()) return;
+    var ro = null, done = false, stop = function () { done = true; if (ro) ro.disconnect(); };
+    var go = function () { if (done || !ok()) return; stop(); m.invalidateSize(false); m.fitBounds(pts, opts); };
+    m.once("unload", stop);
+    if (window.ResizeObserver) { ro = new ResizeObserver(go); ro.observe(el); } else setTimeout(go, 400);
+  }
+
 
   function prepView() {
     var t = now().getTime();
@@ -1267,7 +1279,7 @@ window.KXO_BOOT = function () {
     });
     fLayer = L.layerGroup().addTo(fmap);
     drawFlights(r);
-    fmap.fitBounds(pts, { paddingTopLeft: [30, 54], paddingBottomRight: [30, 46] });
+    fitSized(fmap, pts, { paddingTopLeft: [30, 54], paddingBottomRight: [30, 46] });
   }
   function drawFlights(r) {
     if (!fmap || !fLayer) return;
