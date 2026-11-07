@@ -35,7 +35,7 @@ window.KXOCloud = (function () {
     Object.keys(updates).forEach(function (path) {
       var parts = path.split("/"), o = out;
       for (var i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
-      o[parts[parts.length - 1]] = updates[path];
+      o[parts[parts.length - 1]] = updates[path] == null && window.firebase && firebase.firestore ? firebase.firestore.FieldValue.delete() : updates[path];
     });
     return out;
   }

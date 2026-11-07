@@ -186,6 +186,7 @@ window.KXO_BOOT = function () {
     if (it.notes) h += '<ul class="notes">' + it.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
     if (it.menu) h += '<div class="menu-title">On the table</div><ul class="menu">' + it.menu.map(function (m) { return "<li>" + esc(m[0]) + (m[1] ? '<span class="veg">VEG</span>' : "") + "</li>"; }).join("") + "</ul>";
     if (it.act) h += whoHtml(it.act);
+    if (/Karaoke/.test(it.title)) h += '<div class="pk-entry"><button class="btn-todo" data-go="karaoke">Pick your song</button><span class="muted small">' + (kQueue().length ? kQueue().length + " on the set list" : "Set list is open") + "</span></div>";
     if (it.act === "pickle") { var ch = pkChamps(pkGame()); h += '<div class="pk-entry">' + (ch ? '<span class="tag status ok">Champions: ' + names(ch) + "</span>" : "") + '<button class="btn-todo" data-go="pickle">Open the tournament</button></div>'; }
     return h + "</div></li>";
   }
@@ -335,7 +336,7 @@ window.KXO_BOOT = function () {
       ["Sign the pickleball waiver", "Everyone playing · Fri 11:00a", K.LINKS.pickleWaiver],
       ["Sign the escape room waiver", "The 6 players · Fri 8:00p", K.LINKS.escapeWaiver]
     ];
-    var pkBanner = pkBannerHtml();
+    var pkBanner = pkBannerHtml() + kBannerHtml();
     return '<div class="view-anim"><div class="now" id="nowcard">' + nowInner() + "</div>" + pkBanner + photoStripHtml() + myWeekHtml() +
       '<div class="hl-intro"><div class="kicker">The big picture</div><h2 class="headline">Five days, 14 of us, two turkeys.</h2></div>' +
       '<div class="hl-list">' + DAYS.map(function (d) {
@@ -466,7 +467,7 @@ window.KXO_BOOT = function () {
 
   /* ---------- pickleball tournament: doubles teams, pool play, semis, final ---------- */
   var PK = "pickle", COURTS = [["c1", "Indoor 6"], ["c2", "Indoor 7"]], SLOT_MIN = 15, BUDGET_MIN = 135;
-  var pkResetArmed = false, pkResetTimer = null, pkEditing = {}, celebrated = {};
+  var pkResetArmed = false, pkResetTimer = null, pkEditing = {}, celebrated = {}, pkSel = null;
   function pkGame() { var g = Cloud.game(PK); return g && g.v === 2 ? g : {}; }
   function pkPlayers() { return Cloud.who("pickle"); }
   function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
@@ -599,6 +600,55 @@ window.KXO_BOOT = function () {
     var mins = (slotsFor(queued) + po + playing) * SLOT_MIN;
     return "On pace to finish around " + clock(new Date(now().getTime() + mins * 60000));
   }
+
+  function pkSlots(g) { // [[names...], ...] in team order, plus players not on a team
+    var teams = tIds(g).map(function (id) { return g.teams[id].p.slice(); });
+    var on = {}; teams.forEach(function (t) { t.forEach(function (p) { on[p] = 1; }); });
+    return { teams: teams, bench: pkPlayers().filter(function (p) { return !on[p]; }) };
+  }
+  function pkSaveTeams(g, teams) {
+    var out = {}, n = 0;
+    teams.forEach(function (t) { if (t.length) out["t" + (++n)] = { p: t }; });
+    pkSel = null;
+    Cloud.gameSet(PK, { v: 2, teams: out, at: g.at || Date.now() }).catch(function () { toast("Couldn't save that. Check your connection."); });
+  }
+  function pkFind(slots, name) {
+    for (var i = 0; i < slots.teams.length; i++) { var j = slots.teams[i].indexOf(name); if (j >= 0) return { t: i, j: j }; }
+    var b = slots.bench.indexOf(name); return b >= 0 ? { t: -1, j: b } : null;
+  }
+  function pkTap(name) {
+    var g = pkGame();
+    if (!pkSel) { pkSel = name; render(true); return; }
+    if (pkSel === name) { pkSel = null; render(true); return; }
+    var s = pkSlots(g), A = pkFind(s, pkSel), B = pkFind(s, name);
+    if (!A || !B) { pkSel = null; render(true); return; }
+    var arrA = A.t < 0 ? s.bench : s.teams[A.t], arrB = B.t < 0 ? s.bench : s.teams[B.t];
+    arrA[A.j] = name; arrB[B.j] = pkSel;
+    toast("Swapped " + pkSel + " and " + name + ".");
+    pkSaveTeams(g, s.teams);
+  }
+  function pkMove(target) {
+    var g = pkGame(), s = pkSlots(g), A = pkFind(s, pkSel); if (!A) return;
+    (A.t < 0 ? s.bench : s.teams[A.t]).splice(A.j, 1);
+    if (target === "new") s.teams.push([pkSel]); else s.teams[+target].push(pkSel);
+    toast(pkSel + " moved.");
+    pkSaveTeams(g, s.teams);
+  }
+  function teamEditorHtml(g) {
+    var s = pkSlots(g), selIn = pkSel ? pkFind(s, pkSel) : null;
+    function chip(n) { return '<button class="pk-chip' + (n === pkSel ? " sel" : "") + (n === ME ? " me" : "") + '" data-pkp="' + esc(n) + '">' + esc(n) + "</button>"; }
+    var h = '<p class="muted small" style="margin-top:8px">Want to pick your own teams? <b>Tap two people to swap them</b>, or tap someone and then <b>Move here</b>. Teams lock when the first game starts.</p><div class="pk-teams">';
+    s.teams.forEach(function (t, i) {
+      var mineSel = selIn && selIn.t === i;
+      h += '<div class="pk-team edit' + (mineSel ? " sel-team" : "") + '"><span class="n">' + (i + 1) + '</span><div class="pk-members">' + t.map(chip).join("") +
+        (t.length < 2 ? '<span class="tag status wait">Needs a partner</span>' : t.length > 3 ? '<span class="tag status wait">4+ rotate two at a time</span>' : t.length === 3 ? '<span class="tag">Trio · rotates</span>' : "") + "</div>" +
+        (pkSel && !mineSel ? '<button class="maplink small" data-pkmove="' + i + '">Move here</button>' : "") + "</div>";
+    });
+    if (pkSel) h += '<div class="pk-team edit ghost"><span class="n">+</span><div class="pk-members muted small">Start a new team with ' + esc(pkSel) + '</div><button class="maplink small" data-pkmove="new">New team</button></div>';
+    h += "</div>";
+    if (s.bench.length) h += '<div class="sec" style="margin-top:10px"><span class="sec-label">Not on a team yet</span><div class="pk-members">' + s.bench.map(chip).join("") + "</div></div>";
+    return h;
+  }
   function pickleView() {
     var g = pkGame(), L = pkList(g.sched), ids = tIds(g), players = pkPlayers(), champs = pkChamps(g), open = pkOpen();
     var h = '<div class="view-anim"><div class="day-head"><div class="kicker">Fri, Nov 27 · Picklewood · Indoor 6 + 7</div><h2 class="headline">Pickleball Tournament</h2></div>';
@@ -615,9 +665,8 @@ window.KXO_BOOT = function () {
       return h + "</div>";
     }
 
-    h += '<h3 class="sec-head">Teams</h3><div class="pk-teams">' + ids.map(function (id, i) { return '<div class="pk-team' + (hasMe(g, id) ? " mine" : "") + '"><span class="n">' + (i + 1) + "</span>" + tName(g, id) + "</div>"; }).join("") + "</div>";
-    var late = players.filter(function (p) { return !ids.some(function (id) { return g.teams[id].p.indexOf(p) >= 0; }); });
-    if (late.length) h += '<p class="muted small">Signed up after the draw: ' + late.map(esc).join(", ") + ". Redraw before the first game to include them.</p>";
+    if (!L.length && open) h += '<h3 class="sec-head">Teams</h3>' + teamEditorHtml(g);
+    else h += '<h3 class="sec-head">Teams</h3><div class="pk-teams">' + ids.map(function (id, i) { return '<div class="pk-team' + (hasMe(g, id) ? " mine" : "") + '"><span class="n">' + (i + 1) + "</span>" + tName(g, id) + "</div>"; }).join("") + "</div>";
 
     if (!L.length) {
       var plan = pkPlan(ids);
@@ -666,11 +715,16 @@ window.KXO_BOOT = function () {
     if (act === "inc" || act === "dec") { var v = +getPath(g, path) || 0; up[path] = Math.max(0, Math.min(40, v + (act === "inc" ? 1 : -1))); }
     else if (act === "fix") { pkEditing[key] = !pkEditing[key]; render(true); return; }
     else if (act === "draw") {
+      pkSel = null;
       var pl = pkPlayers(); if (pl.length < 4) { toast("Need at least 4 players."); return; }
       Cloud.gameSet(PK, { v: 2, teams: pkDraw(pl), at: Date.now() }).catch(function () { toast("Couldn't save that. Check your connection."); }); return;
     }
     else if (act === "start") {
-      var ids = tIds(g), plan = pkPlan(ids), sched = {};
+      var ids = tIds(g);
+      if (ids.some(function (id) { return g.teams[id].p.length < 2; })) { toast("Every team needs at least 2 players."); return; }
+      if (ids.length < 2) { toast("Need at least 2 teams."); return; }
+      pkSel = null;
+      var plan = pkPlan(ids), sched = {};
       plan.list.forEach(function (m, i) { sched["g" + (i < 9 ? "0" : "") + (i + 1)] = newGame(m[0], m[1], "pool", i + 1, ""); });
       var list = pkList(sched);
       COURTS.forEach(function (c) { var x = nextFor(list, c[0]); if (x) { x.court = c[0]; sched[x.key].court = c[0]; } });
@@ -798,9 +852,109 @@ window.KXO_BOOT = function () {
   }
   function stopPtv() { if (ptvTimer) { clearInterval(ptvTimer); ptvTimer = null; } }
 
+
+  /* ---------- karaoke: song picker + shared set list ---------- */
+  var KQ = "karaoke", SONGS = window.KXO_SONGS || [];
+  var VIBES = [["party", "Party anthem"], ["ballad", "Ballad"], ["duet", "Duet"], ["group", "Everyone sings"], ["rock", "Rock"], ["pop", "Pop"], ["country", "Country"], ["soul", "R&B + soul"], ["musical", "Disney + musicals"], ["kpop", "K-pop"], ["rap", "Rap"]];
+  var DECADES = [["60", "60s + earlier"], ["70", "70s"], ["80", "80s"], ["90", "90s"], ["00", "2000s"], ["10", "2010s"], ["20", "2020s"]];
+  var LEVELS = [["easy", "Keep it easy"], ["any", "Medium is fine"], ["belt", "I can belt it"]];
+  var kp = (function () { try { return JSON.parse(localStorage.getItem("kxo.kpick")) || null; } catch (e) { return null; } })() || { v: [], d: [], lv: "easy", q: "" };
+  var kSeed = Math.random();
+  function kSave() { try { localStorage.setItem("kxo.kpick", JSON.stringify(kp)); } catch (e) {} }
+  function decadeOf(y) { return y < 1970 ? "60" : y < 1980 ? "70" : y < 1990 ? "80" : y < 2000 ? "90" : y < 2010 ? "00" : y < 2020 ? "10" : "20"; }
+  function norm(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+  function kItems() { var q = (Cloud.game(KQ) || {}).q || {}; return Object.keys(q).map(function (k) { var x = {}; for (var f in q[k]) x[f] = q[k][f]; x.id = k; return x; }); }
+  function kQueue() { // fair rotation: everyone's 1st song, then everyone's 2nd...
+    var pend = kItems().filter(function (x) { return !x.done; }).sort(function (a, b) { return a.ts - b.ts; });
+    var by = {}, order = [];
+    pend.forEach(function (x) { if (!by[x.who]) { by[x.who] = []; order.push(x.who); } by[x.who].push(x); });
+    var out = [], more = true;
+    for (var r = 0; more; r++) { more = false; order.forEach(function (w) { if (by[w][r]) { out.push(by[w][r]); more = true; } }); }
+    return out;
+  }
+  function kOnList(title) { return kItems().some(function (x) { return !x.done && x.who === ME && norm(x.title) === norm(title); }); }
+  function kScore(s) {
+    var tags = s[3].split(" "), sc = 0, q = norm(kp.q);
+    kp.v.forEach(function (v) { if (tags.indexOf(v) >= 0) sc += 3; });
+    if (kp.d.length && kp.d.indexOf(decadeOf(s[2])) >= 0) sc += 3;
+    if (q && (norm(s[1]).indexOf(q) >= 0 || norm(s[0]).indexOf(q) >= 0)) sc += 8;
+    if (kp.lv === "easy") sc += s[4] === 1 ? 2 : s[4] === 3 ? -3 : 0;
+    else if (kp.lv === "any") sc += s[4] === 3 ? -1 : 0;
+    else sc += s[4] === 3 ? 1 : 0;
+    var h = Math.sin((s[0].length * 31 + s[2]) * (kSeed + 1)) * 0.5; // stable shuffle for ties
+    return sc + h;
+  }
+  function kResultsHtml() {
+    var ranked = SONGS.slice().sort(function (a, b) { return kScore(b) - kScore(a); }).slice(0, 8);
+    var diff = ["", "Easy", "Medium", "Big voice"];
+    return ranked.map(function (s) {
+      var on = kOnList(s[0]);
+      return '<div class="ksong"><div class="ksong-t"><b>' + esc(s[0]) + "</b><span>" + esc(s[1]) + " · " + s[2] + '</span><span class="kdiff d' + s[4] + '">' + diff[s[4]] + "</span></div>" +
+        (on ? '<span class="tag status ok">On your list</span>' : '<button class="joinbtn small" data-ksing="' + esc(s[0]) + '" data-kartist="' + esc(s[1]) + '">I\'ll sing this</button>') + "</div>";
+    }).join("");
+  }
+  function chipRow(list, sel, key, single) {
+    return '<div class="kchips">' + list.map(function (c) {
+      var on = single ? sel === c[0] : sel.indexOf(c[0]) >= 0;
+      return '<button class="kchip' + (on ? " on" : "") + '" data-kchip="' + key + ":" + c[0] + '" aria-pressed="' + on + '">' + esc(c[1]) + "</button>";
+    }).join("") + "</div>";
+  }
+  function setRowHtml(x, i, big) {
+    var mine = x.who === ME;
+    return '<li class="kq' + (big ? " now" : "") + '"><span class="kq-n">' + (big ? "Up now" : i) + '</span><div class="kq-b"><b>' + esc(x.who) + "</b><span>" + esc(x.title) + (x.artist ? " · " + esc(x.artist) : "") + "</span></div>" +
+      (big ? '<div class="kq-act"><button class="btn-todo" data-kdone="' + esc(x.id) + '">Done, next singer</button><button class="linkbtn" data-kskip="' + esc(x.id) + '">Skip for now</button></div>'
+        : (mine ? '<button class="linkbtn" data-kdel="' + esc(x.id) + '" aria-label="Remove">Remove</button>' : "")) + "</li>";
+  }
+  function karaokeView() {
+    var h = '<div class="view-anim"><div class="day-head"><div class="kicker">Thu, Nov 26 · after dinner</div><h2 class="headline">Karaoke Night</h2></div>';
+    if (Cloud.state.mode === "error") return h + '<div class="soon-box">Can\'t reach the set list right now. Try again in a bit.</div></div>';
+    if (!live()) return h + '<div class="soon-box">The karaoke set list opens soon.</div></div>';
+    var q = kQueue();
+    h += '<div class="now kset"><div class="kicker">Tonight\'s set list · ' + q.length + " to go</div>";
+    if (q.length) {
+      h += '<ol class="kqlist">' + setRowHtml(q[0], 0, true) + q.slice(1).map(function (x, i) { return setRowHtml(x, i + 1); }).join("") + "</ol>";
+    } else h += '<p class="now-sub">No songs yet. Pick one below and you\'re first up.</p>';
+    h += '<div class="map-tools"><button class="maplink" data-go="karaoke-tv">Show on the TV</button></div><p class="muted small">Everyone gets a turn before anyone sings twice. Find the song in Ikarao when you\'re up.</p></div>';
+    h += '<h3 class="sec-head">Find your song</h3><p class="muted small">Pick a vibe and a decade or two. We\'ll suggest easy crowd-pleasers.</p>' +
+      '<div class="sec-label" style="margin-top:10px">Vibe</div>' + chipRow(VIBES, kp.v, "v") +
+      '<div class="sec-label" style="margin-top:10px">Decades</div>' + chipRow(DECADES, kp.d, "d") +
+      '<div class="sec-label" style="margin-top:10px">Comfort</div>' + chipRow(LEVELS, kp.lv, "lv", true) +
+      '<label class="sec-label" for="kq" style="display:block;margin-top:10px">An artist you love (optional)</label><input id="kq" class="kinput" type="search" autocomplete="off" placeholder="Taylor Swift, ABBA, Queen…" value="' + esc(kp.q) + '">' +
+      '<div id="kresults" class="kresults">' + kResultsHtml() + '</div><div class="map-tools"><button class="maplink" data-kmore>More ideas</button></div>' +
+      '<details class="kcustom"><summary>Not on the list? Add any song</summary><form id="kform"><input class="kinput" id="ktitle" placeholder="Song title" required><input class="kinput" id="kartist" placeholder="Artist"><button class="btn-todo" type="submit">Add to the set list</button></form></details>';
+    return h + "</div>";
+  }
+  function karaokeTvView() {
+    var q = kQueue(), main;
+    if (!q.length) main = '<p class="tv-note">Who\'s first? Add a song from your phone.</p>';
+    else main = '<div class="kicker">Now singing</div><p class="tv-note">' + esc(q[0].who) + '</p><div class="tv-name">' + esc(q[0].title) + (q[0].artist ? " · " + esc(q[0].artist) : "") + "</div>" +
+      (q.length > 1 ? '<div class="kicker" style="margin-top:4vh">Up next</div><ol class="pk-next">' + q.slice(1, 5).map(function (x) { return "<li><b>" + esc(x.who) + "</b> · " + esc(x.title) + "</li>"; }).join("") + "</ol>" : "");
+    return '<div class="tv ktv"><div class="tv-top"><span class="tv-brand">Karaoke Night</span><button class="maplink" data-go="karaoke">Exit</button></div><div class="tv-stage">' + main + '</div>' +
+      '<div class="tv-foot"><div class="tv-qr" id="tv-qr"></div><div>Add your song: scan this, or open the app → Karaoke.</div></div></div>';
+  }
+  function kAdd(title, artist) {
+    if (!ME) { pickMe(function () { kAdd(title, artist); }); return; }
+    var id = "k" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), up = {};
+    up["q/" + id] = { who: ME, title: title, artist: artist || "", ts: Date.now(), done: false };
+    Cloud.gameUpdate(KQ, up).then(function () {
+      var q = kQueue(), pos = q.map(function (x) { return x.id; }).indexOf(id);
+      toast(pos === 0 ? "You're up first!" : "Added. You're #" + (pos + 1) + " in line.");
+    }, function () { toast("Couldn't add that. Check your connection."); });
+  }
+  function kRefreshResults() { var r = document.getElementById("kresults"); if (r) r.innerHTML = kResultsHtml(); }
+  function kTvQr() {
+    var box = document.getElementById("tv-qr");
+    var draw = function () { if (window.QRCode && box && !box.firstChild) new QRCode(box, { text: SITE + "#karaoke", width: 120, height: 120, colorDark: "#0d1915", colorLight: "#f2eadb" }); };
+    if (window.QRCode) draw(); else Cloud.loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js").then(draw).catch(function () {});
+  }
+  function kBannerHtml() {
+    var q = kQueue(); if (!q.length) return "";
+    return '<button class="pk-banner kb" data-go="karaoke"><span class="kicker">Karaoke set list</span><b>Up now: ' + esc(q[0].who) + "</b><span>" + esc(q[0].title) + " · " + q.length + " to go →</span></button>";
+  }
+
   /* ---------- routing ---------- */
   var viewEl = document.getElementById("view"), stripEl = document.getElementById("daystrip"), daysEl = document.getElementById("days");
-  var VIEWS = ["week", "map", "thanks", "tv", "prep", "pickle", "pickle-tv", "photos", "photos-tv"];
+  var VIEWS = ["week", "map", "thanks", "tv", "prep", "pickle", "pickle-tv", "photos", "photos-tv", "karaoke", "karaoke-tv"];
   function todayDay() { return DAYS.filter(function (d) { return d.date === today(); })[0]; }
   var lastDay = todayDay() ? todayDay().id : "wed";
   daysEl.innerHTML = DAYS.map(function (d) {
@@ -814,12 +968,14 @@ window.KXO_BOOT = function () {
   function render(keepScroll) {
     var y = window.scrollY, r = route(), d = DAYS.filter(function (x) { return x.id === r; })[0], section;
     if (lmap) { lmap.remove(); lmap = null; }
-    document.body.classList.toggle("tvmode", r === "tv" || r === "pickle-tv" || r === "photos-tv");
+    document.body.classList.toggle("tvmode", r === "tv" || r === "pickle-tv" || r === "photos-tv" || r === "karaoke-tv");
     if (d) { lastDay = d.id; section = "days"; viewEl.innerHTML = dayView(d); }
     else if (r === "map") { section = "map"; viewEl.innerHTML = mapView(); }
     else if (r === "prep") { section = "prep"; viewEl.innerHTML = prepView(); }
     else if (r === "thanks") { section = "thanks"; viewEl.innerHTML = thanksView(); }
     else if (r === "tv") { section = "thanks"; viewEl.innerHTML = tvView(); }
+    else if (r === "karaoke") { section = "days"; viewEl.innerHTML = karaokeView(); }
+    else if (r === "karaoke-tv") { section = "days"; viewEl.innerHTML = karaokeTvView(); }
     else if (r === "photos") { section = "photos"; viewEl.innerHTML = photosView(); }
     else if (r === "photos-tv") { section = "photos"; viewEl.innerHTML = photosTvView(); }
     else if (r === "pickle") { section = "days"; viewEl.innerHTML = pickleView(); }
@@ -832,6 +988,7 @@ window.KXO_BOOT = function () {
     if (d && d.board) animateBoards();
     if (r === "tv") startTv(); else stopTv();
     if (r === "photos-tv") startPtv(); else stopPtv();
+    if (r === "karaoke-tv") kTvQr();
     if (r === "pickle" || r === "pickle-tv") maybeConfetti();
     renderCrew();
     if (keepScroll) window.scrollTo(0, y);
@@ -891,8 +1048,25 @@ window.KXO_BOOT = function () {
     if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("pin")) { e.preventDefault(); openSheet(e.target.getAttribute("data-place")); }
   });
   document.addEventListener("click", function (e) {
-    var t = e.target.closest("[data-addphoto],[data-photo],[data-lbclose],[data-lbdel],[data-pk],[data-place],[data-go],[data-nav],[data-copy],[data-join],[data-leave],[data-pickme],[data-iam],[data-closewho],[data-unpost],[data-mapfit]");
+    var t = e.target.closest("[data-pkp],[data-pkmove],[data-kchip],[data-ksing],[data-kmore],[data-kdone],[data-kskip],[data-kdel],[data-addphoto],[data-photo],[data-lbclose],[data-lbdel],[data-pk],[data-place],[data-go],[data-nav],[data-copy],[data-join],[data-leave],[data-pickme],[data-iam],[data-closewho],[data-unpost],[data-mapfit]");
     if (!t) return;
+    if (t.hasAttribute("data-pkp")) { pkTap(t.getAttribute("data-pkp")); return; }
+    if (t.hasAttribute("data-pkmove")) { pkMove(t.getAttribute("data-pkmove")); return; }
+    if (t.hasAttribute("data-kchip")) {
+      var kc = t.getAttribute("data-kchip").split(":"), key = kc[0], val = kc[1];
+      if (key === "lv") kp.lv = val; else { var arr = kp[key], ix = arr.indexOf(val); if (ix >= 0) arr.splice(ix, 1); else arr.push(val); }
+      kSave();
+      Array.prototype.forEach.call(document.querySelectorAll('[data-kchip^="' + key + ':"]'), function (b) {
+        var v2 = b.getAttribute("data-kchip").split(":")[1], on = key === "lv" ? kp.lv === v2 : kp[key].indexOf(v2) >= 0;
+        b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
+      });
+      kRefreshResults(); return;
+    }
+    if (t.hasAttribute("data-kmore")) { kSeed = Math.random(); kRefreshResults(); return; }
+    if (t.hasAttribute("data-ksing")) { kAdd(t.getAttribute("data-ksing"), t.getAttribute("data-kartist")); return; }
+    if (t.hasAttribute("data-kdone")) { var u1 = {}; u1["q/" + t.getAttribute("data-kdone") + "/done"] = true; Cloud.gameUpdate(KQ, u1).catch(function () { toast("Couldn't save that."); }); return; }
+    if (t.hasAttribute("data-kskip")) { var u2 = {}; u2["q/" + t.getAttribute("data-kskip") + "/ts"] = Date.now(); Cloud.gameUpdate(KQ, u2).catch(function () { toast("Couldn't save that."); }); return; }
+    if (t.hasAttribute("data-kdel")) { var u3 = {}; u3["q/" + t.getAttribute("data-kdel")] = null; Cloud.gameUpdate(KQ, u3).catch(function () { toast("Couldn't remove that."); }); return; }
     if (t.hasAttribute("data-addphoto")) { if (!ME) { pickMe(function () { document.getElementById("photo-input").click(); }); return; } document.getElementById("photo-input").click(); return; }
     if (t.hasAttribute("data-photo")) { openPhoto(t.getAttribute("data-photo")); return; }
     if (t.hasAttribute("data-lbclose")) { closePhoto(); return; }
@@ -917,7 +1091,16 @@ window.KXO_BOOT = function () {
       catch (err) { msg.textContent = "Couldn't copy. Press and hold the address to copy it."; }
     }
   });
+  document.addEventListener("input", function (e) {
+    if (e.target.id === "kq") { kp.q = e.target.value; kSave(); kRefreshResults(); }
+  });
   document.addEventListener("submit", function (e) {
+    if (e.target.id === "kform") {
+      e.preventDefault();
+      var ti = document.getElementById("ktitle").value.trim(), ar = document.getElementById("kartist").value.trim();
+      if (!ti) return;
+      kAdd(ti.slice(0, 80), ar.slice(0, 60)); document.getElementById("ktitle").value = ""; document.getElementById("kartist").value = ""; return;
+    }
     if (e.target.id !== "wall-form") return;
     e.preventDefault();
     var ta = document.getElementById("wall-text"), text = ta.value.trim();
@@ -939,7 +1122,12 @@ window.KXO_BOOT = function () {
       return;
     }
     if (r === "thanks") { var ta = document.getElementById("wall-text"); if (kind === "mode" && !(ta && ta.value)) render(true); return; }
-    if (kind === "games" && (r === "pickle" || r === "pickle-tv")) { render(true); return; }
+    if (kind === "games" && (r === "pickle" || r === "pickle-tv" || r === "karaoke-tv")) { render(true); return; }
+    if (kind === "games" && r === "karaoke") {
+      var ae = document.activeElement, typing = ae && (ae.id === "kq" || ae.id === "ktitle" || ae.id === "kartist");
+      if (typing) { kRefreshResults(); return; }
+      render(true); return;
+    }
     if (kind === "photos") {
       if (r === "photos-tv") { if (Cloud.state.photos.some(function (p) { return !ptvSeen[p.id]; })) { ptvShow(); if (ptvTimer) { clearInterval(ptvTimer); ptvTimer = setInterval(ptvShow, 7000); } } return; }
       if (r === "photos" || r === "week") softRender();
