@@ -338,7 +338,7 @@ window.KXO_BOOT = function () {
     var pg = pkGame(), pr = pkRounds(pg), pch = pkChamps(pg), pkBanner = "";
     if (pch) pkBanner = '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball champions</span><b>' + names(pch) + "</b></button>";
     else if (pr.length) pkBanner = '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball tournament</span><b>' + (pg.final ? "The final is on" : "Round " + pr[pr.length - 1].n + " in progress") + "</b><span>Scores + leaderboard →</span></button>";
-    return '<div class="view-anim"><div class="now" id="nowcard">' + nowInner() + "</div>" + pkBanner + myWeekHtml() +
+    return '<div class="view-anim"><div class="now" id="nowcard">' + nowInner() + "</div>" + pkBanner + photoStripHtml() + myWeekHtml() +
       '<div class="hl-intro"><div class="kicker">The big picture</div><h2 class="headline">Five days, 14 of us, two turkeys.</h2></div>' +
       '<div class="hl-list">' + DAYS.map(function (d) {
         return '<button class="hl-card" data-go="' + d.id + '"><div class="hl-date"><span class="dow">' + d.dow + '</span><span class="num">' + d.num + '</span></div><div class="hl-body"><h3>' + esc(d.headline) + '</h3><ul class="moments">' +
@@ -635,9 +635,103 @@ window.KXO_BOOT = function () {
     })();
   }
 
+
+  /* ---------- photo stream ---------- */
+  var dayLblFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
+  function stampLabel(ts) { var d = new Date(ts); return dowFmt.format(d) + " " + clock(d); }
+  function compress(file, max, q) {
+    return new Promise(function (res, rej) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, max / Math.max(w, h));
+        var cv = document.createElement("canvas"); cv.width = Math.round(w * s); cv.height = Math.round(h * s);
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        res({ d: cv.toDataURL("image/jpeg", q), w: cv.width, h: cv.height });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); rej(new Error("Couldn't read that image")); };
+      img.src = url;
+    });
+  }
+  function uploadFiles(files) {
+    if (!ME) { pickMe(function () { uploadFiles(files); }); return; }
+    var list = Array.prototype.slice.call(files).filter(function (f) { return /^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name); });
+    if (!list.length) return;
+    var done = 0, failed = 0;
+    toast("Adding " + list.length + " photo" + (list.length > 1 ? "s" : "") + "…");
+    list.reduce(function (p, f) {
+      return p.then(function () {
+        return Promise.all([compress(f, 1600, 0.72), compress(f, 360, 0.6)]).then(function (r) {
+          return Cloud.addPhoto({ name: ME, thumb: r[1].d, w: r[0].w, h: r[0].h }, r[0].d);
+        }).then(function () { done++; }, function () { failed++; });
+      });
+    }, Promise.resolve()).then(function () {
+      toast(failed ? "Added " + done + ", " + failed + " didn't upload." : "Added " + done + " photo" + (done > 1 ? "s" : "") + ". Thanks, " + ME + "!");
+    });
+  }
+  function photosView() {
+    var ph = Cloud.state.photos;
+    var h = '<div class="view-anim"><div class="day-head"><div class="kicker">Photo stream</div><h2 class="headline">Every moment, from every phone</h2></div>';
+    if (Cloud.state.mode === "error") h += '<div class="soon-box">Can\'t reach the photo stream right now. Try again in a bit.</div>';
+    else if (!live()) h += '<div class="soon-box">The photo stream opens soon.</div>';
+    else h += '<div class="map-tools"><button class="btn-todo" data-addphoto>Add photos</button><button class="maplink" data-go="photos-tv">Show on the TV</button></div>' +
+      '<p class="muted small">Photos are shrunk on your phone before upload, so they\'re quick to share. Anyone with the app can see them.</p>';
+    if (!ph.length) return h + (live() ? '<p class="muted" style="margin-top:16px">No photos yet. Start with the arrivals.</p>' : "") + "</div>";
+    var groups = [], cur = null;
+    ph.forEach(function (p) { var k = ptFmt.format(new Date(p.ts)); if (!cur || cur.k !== k) { cur = { k: k, lbl: dayLblFmt.format(new Date(p.ts)), items: [] }; groups.push(cur); } cur.items.push(p); });
+    return h + groups.map(function (g) {
+      return '<h3 class="sec-head">' + esc(g.lbl) + ' <span class="muted small">' + g.items.length + '</span></h3><div class="pgrid">' + g.items.map(function (p) {
+        return '<button class="pthumb" data-photo="' + esc(p.id) + '" aria-label="Photo by ' + esc(p.name) + '"><img src="' + p.thumb + '" alt="" loading="lazy"><span>' + esc(p.name) + "</span></button>";
+      }).join("") + "</div>";
+    }).join("") + "</div>";
+  }
+  function photoStripHtml() {
+    var ph = Cloud.state.photos.slice(0, 8); if (!ph.length) return "";
+    return '<button class="pstrip" data-go="photos"><div class="pstrip-h"><span class="kicker">Latest photos</span><span class="muted small">' + Cloud.state.photos.length + " so far →</span></div><div class=\"pstrip-row\">" +
+      ph.map(function (p) { return '<img src="' + p.thumb + '" alt="">'; }).join("") + "</div></button>";
+  }
+  var lbId = null;
+  function openPhoto(id) {
+    var p = Cloud.state.photos.filter(function (x) { return x.id === id; })[0]; if (!p) return;
+    lbId = id;
+    var sc = document.getElementById("photo-scrim"), img = document.getElementById("lb-img");
+    img.src = p.thumb; img.alt = "Photo by " + p.name;
+    document.getElementById("lb-cap").textContent = p.name + " · " + stampLabel(p.ts);
+    document.getElementById("lb-del").hidden = p.name !== ME;
+    sc.hidden = false;
+    Cloud.getPhoto(id).then(function (d) { if (d && lbId === id) img.src = d; });
+  }
+  function closePhoto() { document.getElementById("photo-scrim").hidden = true; lbId = null; }
+
+  var ptvTimer = null, ptvIdx = 0, ptvSeen = {}, ptvLayer = 0;
+  function photosTvView() {
+    return '<div class="tv ptv"><div class="tv-top"><span class="tv-brand">Karjian <span class="x">×</span> Oh Thanksgiving</span><button class="maplink" data-go="photos">Exit</button></div>' +
+      '<div class="ptv-stage"><img class="ptv-img" id="ptv-a" alt=""><img class="ptv-img" id="ptv-b" alt=""><p class="tv-note" id="ptv-empty" hidden>Add the first photo from your phone.</p></div>' +
+      '<div class="tv-foot"><div class="tv-qr" id="tv-qr"></div><div><div class="ptv-cap" id="ptv-cap"></div><div>Add yours: scan this, or open the app and tap Photos.</div></div></div></div>';
+  }
+  function ptvShow() {
+    var ph = Cloud.state.photos, empty = document.getElementById("ptv-empty"); if (!empty) return;
+    empty.hidden = !!ph.length; if (!ph.length) return;
+    var fresh = ph.filter(function (p) { return !ptvSeen[p.id]; }).slice(-1)[0];
+    var p = fresh || ph[ptvIdx++ % ph.length]; ptvSeen[p.id] = 1;
+    Cloud.getPhoto(p.id).then(function (d) {
+      var next = document.getElementById(ptvLayer ? "ptv-a" : "ptv-b"), prev = document.getElementById(ptvLayer ? "ptv-b" : "ptv-a");
+      if (!next) return;
+      next.onload = function () { next.classList.add("on"); prev.classList.remove("on"); ptvLayer = 1 - ptvLayer; document.getElementById("ptv-cap").textContent = p.name + " · " + stampLabel(p.ts); };
+      next.src = d || p.thumb;
+    });
+  }
+  function startPtv() {
+    stopPtv(); ptvShow(); ptvTimer = setInterval(ptvShow, 7000);
+    var box = document.getElementById("tv-qr");
+    var draw = function () { if (window.QRCode && box && !box.firstChild) new QRCode(box, { text: SITE + "#photos", width: 120, height: 120, colorDark: "#0d1915", colorLight: "#f2eadb" }); };
+    if (window.QRCode) draw(); else Cloud.loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js").then(draw).catch(function () {});
+  }
+  function stopPtv() { if (ptvTimer) { clearInterval(ptvTimer); ptvTimer = null; } }
+
   /* ---------- routing ---------- */
   var viewEl = document.getElementById("view"), stripEl = document.getElementById("daystrip"), daysEl = document.getElementById("days");
-  var VIEWS = ["week", "map", "thanks", "tv", "prep", "pickle", "pickle-tv"];
+  var VIEWS = ["week", "map", "thanks", "tv", "prep", "pickle", "pickle-tv", "photos", "photos-tv"];
   function todayDay() { return DAYS.filter(function (d) { return d.date === today(); })[0]; }
   var lastDay = todayDay() ? todayDay().id : "wed";
   daysEl.innerHTML = DAYS.map(function (d) {
@@ -651,12 +745,14 @@ window.KXO_BOOT = function () {
   function render(keepScroll) {
     var y = window.scrollY, r = route(), d = DAYS.filter(function (x) { return x.id === r; })[0], section;
     if (lmap) { lmap.remove(); lmap = null; }
-    document.body.classList.toggle("tvmode", r === "tv" || r === "pickle-tv");
+    document.body.classList.toggle("tvmode", r === "tv" || r === "pickle-tv" || r === "photos-tv");
     if (d) { lastDay = d.id; section = "days"; viewEl.innerHTML = dayView(d); }
     else if (r === "map") { section = "map"; viewEl.innerHTML = mapView(); }
     else if (r === "prep") { section = "prep"; viewEl.innerHTML = prepView(); }
     else if (r === "thanks") { section = "thanks"; viewEl.innerHTML = thanksView(); }
     else if (r === "tv") { section = "thanks"; viewEl.innerHTML = tvView(); }
+    else if (r === "photos") { section = "photos"; viewEl.innerHTML = photosView(); }
+    else if (r === "photos-tv") { section = "photos"; viewEl.innerHTML = photosTvView(); }
     else if (r === "pickle") { section = "days"; viewEl.innerHTML = pickleView(); }
     else if (r === "pickle-tv") { section = "days"; viewEl.innerHTML = pickleTvView(); }
     else { section = "week"; viewEl.innerHTML = weekView(); }
@@ -666,6 +762,7 @@ window.KXO_BOOT = function () {
     if (r === "map") initMap();
     if (d && d.board) animateBoards();
     if (r === "tv") startTv(); else stopTv();
+    if (r === "photos-tv") startPtv(); else stopPtv();
     if (r === "pickle" || r === "pickle-tv") maybeConfetti();
     renderCrew();
     if (keepScroll) window.scrollTo(0, y);
@@ -675,7 +772,7 @@ window.KXO_BOOT = function () {
     clearTimeout(softTimer);
     softTimer = setTimeout(function () {
       var r = route();
-      if (r === "map" || r === "tv" || r === "pickle-tv") return;
+      if (r === "map" || r === "tv" || r === "pickle-tv" || r === "photos-tv") return;
       if (r === "thanks") { var l = document.getElementById("wall-list"); if (l) l.innerHTML = wallListHtml(); return; }
       render(true);
     }, 120);
@@ -721,12 +818,16 @@ window.KXO_BOOT = function () {
   scrim.addEventListener("click", function (e) { if (e.target === scrim) closeSheet(); });
   whoScrim.addEventListener("click", function (e) { if (e.target === whoScrim) closeWho(); });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") { if (!scrim.hidden) closeSheet(); if (!whoScrim.hidden) closeWho(); }
+    if (e.key === "Escape") { if (!scrim.hidden) closeSheet(); if (!whoScrim.hidden) closeWho(); closePhoto(); }
     if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("pin")) { e.preventDefault(); openSheet(e.target.getAttribute("data-place")); }
   });
   document.addEventListener("click", function (e) {
-    var t = e.target.closest("[data-pk],[data-place],[data-go],[data-nav],[data-copy],[data-join],[data-leave],[data-pickme],[data-iam],[data-closewho],[data-unpost],[data-mapfit]");
+    var t = e.target.closest("[data-addphoto],[data-photo],[data-lbclose],[data-lbdel],[data-pk],[data-place],[data-go],[data-nav],[data-copy],[data-join],[data-leave],[data-pickme],[data-iam],[data-closewho],[data-unpost],[data-mapfit]");
     if (!t) return;
+    if (t.hasAttribute("data-addphoto")) { if (!ME) { pickMe(function () { document.getElementById("photo-input").click(); }); return; } document.getElementById("photo-input").click(); return; }
+    if (t.hasAttribute("data-photo")) { openPhoto(t.getAttribute("data-photo")); return; }
+    if (t.hasAttribute("data-lbclose")) { closePhoto(); return; }
+    if (t.hasAttribute("data-lbdel")) { var pid = lbId; closePhoto(); Cloud.removePhoto(pid).then(function () { toast("Photo deleted."); }, function () { toast("Couldn't delete that."); }); return; }
     if (t.hasAttribute("data-pk")) { if (!t.disabled) pkAction(t); return; }
     if (t.hasAttribute("data-place")) { openSheet(t.getAttribute("data-place")); return; }
     if (t.hasAttribute("data-go")) { go(t.getAttribute("data-go")); return; }
@@ -758,6 +859,8 @@ window.KXO_BOOT = function () {
     if (!ME) pickMe(send); else send();
   });
   window.addEventListener("hashchange", function () { render(); });
+  document.getElementById("photo-input").addEventListener("change", function (e) { var f = e.target.files; if (f && f.length) uploadFiles(f); e.target.value = ""; });
+  document.getElementById("photo-scrim").addEventListener("click", function (e) { if (e.target.id === "photo-scrim") closePhoto(); });
 
   Cloud.on(function (kind) {
     var r = route();
@@ -768,6 +871,11 @@ window.KXO_BOOT = function () {
     }
     if (r === "thanks") { var ta = document.getElementById("wall-text"); if (kind === "mode" && !(ta && ta.value)) render(true); return; }
     if (kind === "games" && (r === "pickle" || r === "pickle-tv")) { render(true); return; }
+    if (kind === "photos") {
+      if (r === "photos-tv") { if (Cloud.state.photos.some(function (p) { return !ptvSeen[p.id]; })) { ptvShow(); if (ptvTimer) { clearInterval(ptvTimer); ptvTimer = setInterval(ptvShow, 7000); } } return; }
+      if (r === "photos" || r === "week") softRender();
+      return;
+    }
     softRender();
   });
 

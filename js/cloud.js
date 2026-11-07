@@ -3,7 +3,7 @@
    "off" (no config yet), "error" (couldn't connect). */
 window.KXOCloud = (function () {
   var listeners = [];
-  var state = { mode: "off", signups: {}, wall: [], games: {} };
+  var state = { mode: "off", signups: {}, wall: [], games: {}, photos: [] };
   function emit(kind) { listeners.forEach(function (f) { try { f(kind); } catch (e) { console.error(e); } }); }
 
   function setSignups(rows) {
@@ -22,8 +22,12 @@ window.KXOCloud = (function () {
     who: function (act) { return (state.signups[act] || []).map(function (r) { return r.person; }); },
     join: noop, leave: noop, post: noop, remove: noop,
     game: function (id) { return state.games[id] || null; },
-    gameUpdate: noop, gameSet: noop
+    gameUpdate: noop, gameSet: noop,
+    addPhoto: noop, removePhoto: noop, getPhoto: noop
   };
+  function setPhotos(rows) { state.photos = rows.sort(function (a, b) { return b.ts - a.ts; }); emit("photos"); }
+  var fullCache = {};
+  function cached(id, load) { if (fullCache[id]) return Promise.resolve(fullCache[id]); return load().then(function (d) { if (d) fullCache[id] = d; return d; }); }
   function setGames(g) { state.games = g || {}; emit("games"); }
   // "a/b/c" paths -> nested object (for Firestore merge writes)
   function nest(updates) {
@@ -92,6 +96,17 @@ window.KXOCloud = (function () {
         }, function (err) { console.error(err); });
         api.gameUpdate = function (id, updates) { return db.collection("games").doc(id).set(nest(updates), { merge: true }); };
         api.gameSet = function (id, val) { return val == null ? db.collection("games").doc(id).delete() : db.collection("games").doc(id).set(val); };
+        db.collection("photos").orderBy("ts", "desc").limit(500).onSnapshot(function (snap) {
+          var rows = []; snap.forEach(function (d) { var x = d.data(opts); rows.push({ id: d.id, name: x.name, thumb: x.thumb, w: x.w, h: x.h, ts: millis(x.ts) }); }); setPhotos(rows);
+        }, function (err) { console.error(err); });
+        api.addPhoto = function (meta, full) {
+          var ref = db.collection("photos").doc(), b = db.batch();
+          b.set(ref, { name: meta.name, thumb: meta.thumb, w: meta.w, h: meta.h, ts: stamp() });
+          b.set(db.collection("photoFull").doc(ref.id), { d: full });
+          return b.commit();
+        };
+        api.removePhoto = function (id) { var b = db.batch(); b.delete(db.collection("photos").doc(id)); b.delete(db.collection("photoFull").doc(id)); return b.commit(); };
+        api.getPhoto = function (id) { return cached(id, function () { return db.collection("photoFull").doc(id).get().then(function (d) { return d.exists ? d.data().d : null; }); }); };
         state.mode = "firebase"; state.backend = "Firestore"; emit("mode");
       });
     });
@@ -125,6 +140,17 @@ window.KXOCloud = (function () {
         db.ref("games").on("value", function (snap) { setGames(snap.val() || {}); }, function (err) { console.error(err); });
         api.gameUpdate = function (id, updates) { var u = {}; Object.keys(updates).forEach(function (k) { u[id + "/" + k] = updates[k]; }); return db.ref("games").update(u); };
         api.gameSet = function (id, val) { return db.ref("games/" + id).set(val == null ? null : val); };
+        db.ref("photos").on("value", function (snap) {
+          var rows = []; snap.forEach(function (c) { var x = c.val() || {}; rows.push({ id: c.key, name: x.name, thumb: x.thumb, w: x.w, h: x.h, ts: x.ts || Date.now() }); return false; }); setPhotos(rows);
+        }, function (err) { console.error(err); });
+        api.addPhoto = function (meta, full) {
+          var id = db.ref("photos").push().key, u = {};
+          u["photos/" + id] = { name: meta.name, thumb: meta.thumb, w: meta.w, h: meta.h, ts: TS };
+          u["photoFull/" + id] = { d: full };
+          return db.ref().update(u);
+        };
+        api.removePhoto = function (id) { var u = {}; u["photos/" + id] = null; u["photoFull/" + id] = null; return db.ref().update(u); };
+        api.getPhoto = function (id) { return cached(id, function () { return db.ref("photoFull/" + id).once("value").then(function (x) { var v = x.val(); return v ? v.d : null; }); }); };
         state.mode = "firebase"; state.backend = "Realtime Database"; emit("mode");
       });
     });
@@ -145,6 +171,10 @@ window.KXOCloud = (function () {
       write(d); return Promise.resolve();
     };
     api.gameSet = function (id, val) { var d = read(); if (val == null) delete d.games[id]; else d.games[id] = val; write(d); return Promise.resolve(); };
+    var memPhotos = [], memFull = {};
+    api.addPhoto = function (meta, full) { var id = "p" + Date.now() + Math.floor(Math.random() * 1000); memPhotos.push({ id: id, name: meta.name, thumb: meta.thumb, w: meta.w, h: meta.h, ts: Date.now() }); memFull[id] = full; setPhotos(memPhotos.slice()); return Promise.resolve(); };
+    api.removePhoto = function (id) { memPhotos = memPhotos.filter(function (p) { return p.id !== id; }); delete memFull[id]; setPhotos(memPhotos.slice()); return Promise.resolve(); };
+    api.getPhoto = function (id) { return Promise.resolve(memFull[id] || null); };
     api.join = function (act, person) { var d = read(); d.signups = d.signups.filter(function (r) { return !(r.activity === act && r.person === person); }); d.signups.push({ activity: act, person: person, ts: Date.now() }); write(d); return Promise.resolve(); };
     api.leave = function (act, person) { var d = read(); d.signups = d.signups.filter(function (r) { return !(r.activity === act && r.person === person); }); write(d); return Promise.resolve(); };
     api.post = function (name, text) { var d = read(); d.wall.push({ id: "m" + Date.now(), name: name, text: text, ts: Date.now() }); write(d); return Promise.resolve(); };
