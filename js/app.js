@@ -379,9 +379,9 @@ window.KXO_BOOT = function () {
       return;
     }
     lmap = L.map(el, { scrollWheelZoom: false, zoomControl: true });
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      subdomains: "abcd", maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(lmap);
     L.marker([K.HOME.lat, K.HOME.lon], { icon: L.divIcon({ className: "", html: '<span class="lhome">Home</span>', iconSize: [56, 22], iconAnchor: [28, 11] }), keyboard: false }).addTo(lmap);
     Object.keys(PL).forEach(function (key) {

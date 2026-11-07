@@ -218,6 +218,8 @@ h2 { font-family: var(--display); font-weight: 800; margin: 0; font-size: 26px; 
 .lpop span { font-size: 12.5px; color: #444; }
 .lpop .dirbtn { margin-top: 6px; border-color: #0d1915; color: #0d1915; justify-self: start; }
 .leaflet-container { font-family: var(--body); background: var(--board-bg); }
+/* darken the OpenStreetMap tiles to match the app; pins and popups are untouched */
+.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.55); }
 .radar-wrap { margin-top: 12px; background: var(--board-bg); border: 1px solid var(--line); border-radius: 16px; padding: 8px; }
 .radar { width: 100%; height: auto; display: block; }
 .radar .ring { fill: none; stroke: var(--line); stroke-width: 1; }
