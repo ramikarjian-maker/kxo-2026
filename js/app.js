@@ -144,15 +144,15 @@ window.KXO_BOOT = function () {
     var a = ACTS[actId], names = Cloud.who(actId), mine = joined(actId, ME);
     var full = a.cap && names.length >= a.cap && !mine;
     var label = a.kind === "driver" ? "Driver" : "Who's in";
-    var empty = a.kind === "driver" ? "No driver yet" : a.kind === "role" ? "Open" : "No one yet";
+    var empty = a.kind === "driver" ? "No driver yet" : a.kind === "dish" ? "Open" : "No one yet";
     var chips = names.length ? names.map(function (n) { return '<span class="pchip' + (n === ME ? " me" : "") + '">' + esc(n) + "</span>"; }).join("") : '<span class="none">' + empty + "</span>";
     var count = a.cap && a.cap > 1 ? '<span class="cap">' + names.length + " of " + a.cap + "</span>" : (names.length && !a.cap ? '<span class="cap">' + names.length + "</span>" : "");
     var btn;
     if (Cloud.state.mode === "error") btn = '<span class="soon">Can\'t reach sign-ups right now. Try again in a bit.</span>';
     else if (!live()) btn = '<span class="soon">Sign-ups open soon</span>';
-    else if (mine) btn = '<button class="joinbtn on" data-leave="' + actId + '">' + (a.kind === "driver" ? "You're driving · Undo" : "You're in · Undo") + "</button>";
+    else if (mine) btn = '<button class="joinbtn on" data-leave="' + actId + '">' + (a.kind === "driver" ? "You're driving · Undo" : a.kind === "dish" ? "You're making it · Undo" : "You're in · Undo") + "</button>";
     else if (full) btn = '<button class="joinbtn" disabled>Full</button>';
-    else btn = '<button class="joinbtn" data-join="' + actId + '">' + (a.kind === "driver" ? "I'll drive" : a.kind === "role" ? "I'll do it" : "I'm in") + "</button>";
+    else btn = '<button class="joinbtn" data-join="' + actId + '">' + (a.kind === "driver" ? "I'll drive" : a.kind === "dish" ? "I'll make it" : "I'm in") + "</button>";
     return '<div class="who' + (compact ? " compact" : "") + '">' + (compact ? "" : '<div class="who-top"><span class="sec-label">' + label + "</span>" + count + "</div>") +
       '<div class="pchips">' + chips + "</div>" + btn + "</div>";
   }
@@ -160,7 +160,7 @@ window.KXO_BOOT = function () {
     if (!ME) { pickMe(function () { doJoin(act); }); return; }
     var a = ACTS[act], who = Cloud.who(act);
     if (a.cap && who.length >= a.cap && who.indexOf(ME) < 0) { toast("That one's full."); return; }
-    Cloud.join(act, ME).then(function () { toast(a.kind === "driver" ? "Thanks for driving, " + ME + "!" : "You're in, " + ME + "!"); }, function () { toast("Couldn't save that. Check your connection."); });
+    Cloud.join(act, ME).then(function () { toast(a.kind === "driver" ? "Thanks for driving, " + ME + "!" : a.kind === "dish" ? "Thanks, " + ME + "! You're on " + (a.short || a.title).toLowerCase() + "." : "You're in, " + ME + "!"); }, function () { toast("Couldn't save that. Check your connection."); });
   }
   function doLeave(act) { if (!ME) return; Cloud.leave(act, ME).catch(function () { toast("Couldn't save that. Check your connection."); }); }
 
@@ -171,8 +171,8 @@ window.KXO_BOOT = function () {
     return '<button class="dirbtn" data-place="' + key + '">' + ICON.pin + 'Directions <span class="dt">' + esc(p.drive) + "</span></button>";
   }
   function statusTag(s) { return s ? '<span class="tag status ' + s[0] + '">' + esc(s[1]) + "</span>" : ""; }
-  function ownsStep(it, name) { if (!it.owner || !name) return false; if (it.owner === name) return true; var r = K.OWNER_ROLE[it.owner]; return !!r && Cloud.who(r)[0] === name; }
-  function ownerLabel(o) { var r = K.OWNER_ROLE[o]; if (!r) return o; var n = Cloud.who(r)[0]; return n ? o + ": " + n : o; }
+  function ownsStep(it, name) { if (!it.owner || !name) return false; if (it.owner === name) return true; var r = K.OWNER_ROLE[it.owner]; return !!r && Cloud.who(r).indexOf(name) >= 0; }
+  function ownerLabel(o) { var r = K.OWNER_ROLE[o]; if (!r) return o; var n = Cloud.who(r); return n.length ? o + ": " + n.join(" + ") : o + ": open"; }
 
   function itemHtml(it, isNext) {
     var cls = "item" + (it.feature ? " feature" : "") + (isNext ? " next" : "");
@@ -184,7 +184,10 @@ window.KXO_BOOT = function () {
     if (it.logi) h += '<div class="sec"><div class="sec-label">Logistics</div><ul class="logi">' + it.logi.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul></div>";
     if (it.todo) h += '<div class="sec"><div class="sec-label">Need to do</div><div class="todos">' + it.todo.map(function (t) { return '<a class="btn-todo" href="' + esc(t[1]) + '" target="_blank" rel="noopener">' + esc(t[0]) + ICON.out + "</a>"; }).join("") + "</div></div>";
     if (it.notes) h += '<ul class="notes">' + it.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
-    if (it.menu) h += '<div class="menu-title">On the table</div><ul class="menu">' + it.menu.map(function (m) { return "<li>" + esc(m[0]) + (m[1] ? '<span class="veg">VEG</span>' : "") + "</li>"; }).join("") + "</ul>";
+    if (it.menu) h += '<div class="menu-title">On the table · who\'s making it</div><ul class="menu">' + it.menu.map(function (m) {
+      var cooks = m[2] && ACTS[m[2]] ? Cloud.who(m[2]) : null;
+      return "<li>" + esc(m[0]) + (m[1] ? '<span class="veg">VEG</span>' : "") + (cooks ? '<span class="cook' + (cooks.length ? "" : " open") + '">' + (cooks.length ? esc(cooks.join(" + ")) : "open") + "</span>" : "") + "</li>";
+    }).join("") + '</ul><button class="linkbtn menu-go" data-go="prep">Sign up for a dish →</button>';
     if (it.act) h += whoHtml(it.act);
     if (/Karaoke/.test(it.title)) h += '<div class="pk-entry"><button class="btn-todo" data-go="karaoke">Pick your song</button><span class="muted small">' + (kQueue().length ? kQueue().length + " on the set list" : "Set list is open") + "</span></div>";
     if (it.act === "pickle") { var ch = pkChamps(pkGame()); h += '<div class="pk-entry">' + (ch ? '<span class="tag status ok">Champions: ' + names(ch) + "</span>" : "") + '<button class="btn-todo" data-go="pickle">Open the tournament</button></div>'; }
@@ -309,8 +312,7 @@ window.KXO_BOOT = function () {
       if (!relevant(it, ME)) return;
       rows.push({ s: e.s, when: e.d.dow + " " + it.t, txt: it.title, tag: it.all ? "" : "You're in", c: "ok" });
     });
-    Object.keys(ACTS).forEach(function (id) { var a = ACTS[id]; if (a.kind === "role" && joined(id, ME)) rows.push({ s: ms(a.at), when: a.when, txt: a.title, tag: "Your job", c: "ok" }); });
-    if (ME === "Susan") rows.push({ s: ms("2026-11-26T12:30"), when: "Thu 12:30p", txt: "Oven turkey + gravy", tag: "Your job", c: "ok" });
+    Object.keys(ACTS).forEach(function (id) { var a = ACTS[id]; if (a.kind === "dish" && joined(id, ME)) rows.push({ s: ms(a.at), when: a.when, txt: a.title, tag: "Your dish", c: "ok" }); });
     rows.sort(function (a, b) { return a.s - b.s; });
     var todos = Object.keys(ACTS).filter(function (id) { return ACTS[id].todo && joined(id, ME); });
     var open = Object.keys(ACTS).filter(function (id) { return !ACTS[id].kind && !joined(id, ME); });
@@ -412,8 +414,9 @@ window.KXO_BOOT = function () {
     var clockCard = today() === "2026-11-26"
       ? '<div class="now" id="kclock">' + kitchenClockInner() + "</div>"
       : (t < ms("2026-11-26T00:00") ? '<div class="teaser">On Thanksgiving morning this becomes a live kitchen clock: what\'s happening now, who\'s on it, and a countdown to the next step.</div>' : "");
-    var roles = '<div class="roles"><div class="menu-title">Thursday roles</div><div class="role"><div class="role-who">Oven turkey + gravy</div><div class="pchips"><span class="pchip">Susan</span></div></div>' +
-      Object.keys(ACTS).filter(function (id) { return ACTS[id].kind === "role"; }).map(function (id) {
+    var dishes = Object.keys(ACTS).filter(function (id) { return ACTS[id].kind === "dish"; }), taken = dishes.filter(function (id) { return Cloud.who(id).length; }).length;
+    var roles = '<div class="roles"><div class="menu-title">Who\'s making what · ' + taken + " of " + dishes.length + ' dishes claimed</div><div class="role-what">Sign up for a dish (up to 2 people each) and you own it start to finish: the make-ahead and the Thursday cooking. Your steps show up in the run sheet below and on your Highlights.</div>' +
+      dishes.map(function (id) {
         var a = ACTS[id];
         return '<div class="role"><div class="role-who">' + esc(a.title) + '</div><div class="role-what">' + esc(a.what) + "</div>" + whoHtml(id, true) + "</div>";
       }).join("") + "</div>";
@@ -993,16 +996,101 @@ window.KXO_BOOT = function () {
     else { s.k = "done"; s.label = "Arrived"; s.c = "ok"; s.frac = 1; }
     return s;
   }
-  function flyAirborne(list, t) { return list.some(function (f) { var s = flyState(f, t); return s.k === "air" || s.k === "soon"; }); }
+  function flyAirborne(list, t) { return list.some(function (f) { var s = flyNow(f, t); return s.k === "air" || s.k === "soon"; }); }
+
+  /* live positions via the Apps Script relay (window.KXO_LIVE); schedule clock is the fallback */
+  var LIVE_URL = Q.get("liveurl") || window.KXO_LIVE || "", FLYTEST = (Q.get("flytest") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  var LIVE = { ac: {}, at: 0, ok: null }, trails = {}, liveTimer = null, liveBusy = false;
+  function csOf(f) { return FLYTEST && flyList(f.dir)[0] === f ? FLYTEST : f.cs; }
+  function isTest(f) { return csOf(f) !== f.cs; }
+  function liveOn() { return !!LIVE_URL && (!OVERRIDE || !!FLYTEST); }
+  function liveWanted(f) { if (isTest(f)) return true; var t = Date.now(); return t >= ms(f.dep) - 3600000 && t <= ms(f.arr) + 3 * 3600000; }
+  function kmBetween(p, q) {
+    var p1 = p[0] * RAD, p2 = q[0] * RAD, dp = p2 - p1, dl = (q[1] - p[1]) * RAD;
+    return 2 * 6371 * Math.asin(Math.sqrt(Math.pow(Math.sin(dp / 2), 2) + Math.cos(p1) * Math.cos(p2) * Math.pow(Math.sin(dl / 2), 2)));
+  }
+  function alongRoute(a, b, pt) {
+    var A = [a.lat, a.lon], B = [b.lat, b.lon], d13 = kmBetween(A, pt) / 6371, D = kmBetween(A, B);
+    var dth = (bearing(A, pt) - bearing(A, B)) * RAD, xt = Math.asin(Math.sin(d13) * Math.sin(dth));
+    var at = Math.acos(Math.max(-1, Math.min(1, Math.cos(d13) / Math.cos(xt)))) * 6371 * (Math.cos(dth) < 0 ? -1 : 1);
+    return { xt: xt * 6371, at: at, D: D };
+  }
+  function livePos(f) {
+    if (!liveOn()) return null;
+    var d = LIVE.ac[csOf(f)]; if (!d || !d.found) return null;
+    if (Date.now() - (d.at || 0) - (d.age || 0) * 1000 > 5 * 60000) return null;
+    var a = AP[f.from], b = AP[f.to], pt = [d.lat, d.lon], g = alongRoute(a, b, pt);
+    if (!isTest(f)) {
+      if (Math.abs(g.xt) > 350 || g.at < -100 || g.at > g.D + 100) return null;
+      if (!d.gnd && d.trk != null) { var rb = bearing(pt, [b.lat, b.lon]), dd = Math.abs(((d.trk - rb) % 360 + 540) % 360 - 180); if (dd > 110 && kmBetween(pt, [b.lat, b.lon]) > 60) return null; }
+    }
+    var remain = kmBetween(pt, [b.lat, b.lon]);
+    return { lat: d.lat, lon: d.lon, trk: d.trk, alt: d.alt, gs: d.gs, gnd: d.gnd, src: d.src, frac: Math.max(0, Math.min(1, g.at / g.D)), remain: remain,
+      eta: !d.gnd && d.gs > 120 ? Date.now() + (remain / (d.gs * 1.852)) * 3600000 + 7 * 60000 : null };
+  }
+  function flyNow(f, t) {
+    var s = flyState(f, t), lp = livePos(f);
+    if (!lp) return s;
+    s.live = lp;
+    if (lp.gnd) { if (lp.frac > 0.5) { s.k = "landed"; s.label = "Landed"; s.c = "ok"; s.frac = 1; } else { s.k = "soon"; s.label = "Taxiing"; s.c = "wait"; s.frac = 0; } }
+    else { s.k = "air"; s.label = "Live"; s.c = "ok live"; s.frac = lp.frac; }
+    return s;
+  }
+  function liveLine(lp) {
+    if (lp.gnd) return "";
+    var bits = [];
+    if (lp.alt) bits.push(Math.round(lp.alt / 100) * 100 >= 1000 ? (Math.round(lp.alt / 100) * 100).toLocaleString("en-US") + " ft" : lp.alt + " ft");
+    if (lp.gs) bits.push(Math.round(lp.gs * 1.151) + " mph");
+    if (lp.eta) bits.push("lands ≈ " + clock(new Date(lp.eta)) + " PT");
+    return bits.join(" · ");
+  }
+  function livePoll() {
+    var r = route(); if (!FLYDIR[r] || !liveOn() || liveBusy) return;
+    var want = flyList(FLYDIR[r]).filter(liveWanted).map(csOf);
+    if (!want.length) { LIVE.idle = true; flyRefresh(); return; }
+    LIVE.idle = false; liveBusy = true;
+    fetch(LIVE_URL + (LIVE_URL.indexOf("?") < 0 ? "?" : "&") + "cs=" + want.join(","), { cache: "no-store" })
+      .then(function (res) { return res.json(); })
+      .then(function (d) {
+        if (!d || !d.ok || !d.ac) throw new Error("bad");
+        LIVE.ok = true; LIVE.at = Date.now();
+        Object.keys(d.ac).forEach(function (cs) {
+          var v = d.ac[cs]; LIVE.ac[cs] = v;
+          if (v && v.found) { var tr = trails[cs] = trails[cs] || [], last = tr[tr.length - 1]; if (!last || last[0] !== v.lat || last[1] !== v.lon) tr.push([v.lat, v.lon]); if (tr.length > 400) tr.shift(); }
+        });
+      })
+      .catch(function () { LIVE.ok = false; })
+      .then(function () { liveBusy = false; flyRefresh(); });
+  }
+  function liveStatusHtml(dir) {
+    if (!liveOn()) return '<span class="fl-dot"></span>Planes move on the schedule clock. For delays and gates, use FlightAware. For the real plane, switch to Live radar.';
+    var list = flyList(dir), tracked = list.filter(function (f) { return !!livePos(f); }), n = tracked.length;
+    var srcs = tracked.map(function (f) { return LIVE.ac[csOf(f)].src; }).filter(function (x, i, arr) { return x && arr.indexOf(x) === i; });
+    if (LIVE.idle || LIVE.ok === null && !list.some(liveWanted)) return '<span class="fl-dot"></span>Live tracking switches on an hour before each departure. Until then, planes follow the schedule.';
+    if (LIVE.ok === null) return '<span class="fl-dot"></span>Connecting to live tracking…';
+    if (!LIVE.ok) return '<span class="fl-dot"></span>Live tracking is unreachable right now, so planes follow the schedule. FlightAware has the official status.';
+    var ago = Math.max(0, Math.round((Date.now() - LIVE.at) / 1000));
+    return n
+      ? '<span class="fl-dot on"></span><b>Live:</b> ' + n + " of " + list.length + " planes tracked · updated " + ago + "s ago" + (srcs.length ? " via " + esc(srcs.join(" + ")) : "") + ". Any others follow the schedule."
+      : '<span class="fl-dot on"></span>Live tracking is on. No transponder signal yet, so planes follow the schedule. They show up once a plane is at the gate or taxiing.';
+  }
+  function flyRefresh() {
+    var rr = route(); if (!FLYDIR[rr]) return;
+    if (flyTab === "route") drawFlights(rr);
+    var c = document.getElementById("fcards"); if (c) c.innerHTML = fcardsHtml(FLYDIR[rr]);
+    var st = document.getElementById("flylive"); if (st) st.innerHTML = liveStatusHtml(FLYDIR[rr]);
+    var dot = document.querySelector(".livedot"); if (dot) dot.classList.toggle("on", flyAirborne(flyList(FLYDIR[rr]), now().getTime()));
+  }
   function fcardsHtml(dir) {
     var t = now().getTime();
     return flyList(dir).map(function (f) {
-      var s = flyState(f, t), c = flyColor(f), drv = Cloud.who(f.drive)[0], pct = (s.frac * 100).toFixed(1);
-      var line = s.k === "sched" ? "Departs " + tz(f.etd) + " · lands " + tz(f.eta)
+      var s = flyNow(f, t), c = flyColor(f), drv = Cloud.who(f.drive)[0], pct = (s.frac * 100).toFixed(1), lp = s.live;
+      var line = lp ? (lp.gnd ? (s.k === "landed" ? (f.dir === "arr" ? "On the ground at " + f.to + ". Head to arrivals." : "Landed in " + f.to + ".") : "On the ground at " + f.from + ", taxiing or at the gate.") : liveLine(lp))
+        : s.k === "sched" ? "Departs " + tz(f.etd) + " · lands " + tz(f.eta)
         : s.k === "soon" ? 'Wheels up <b data-until="' + s.d + '" data-fmt="in">' + inText(s.d - t) + "</b>"
         : s.k === "air" ? 'Lands <b data-until="' + s.a + '" data-fmt="in">' + inText(s.a - t) + "</b> (on schedule)"
         : f.dir === "arr" ? "Scheduled in at " + tz(f.eta) + ". Check FlightAware for the gate." : "Scheduled in at " + tz(f.eta) + ".";
-      return '<div class="fcard" style="--fc:' + c + '"><div class="fc-top"><b>' + esc(f.who) + '</b><span class="fc-no">' + esc(f.flight) + '</span><span class="tag status ' + s.c + '">' + esc(s.label) + "</span></div>" +
+      return '<div class="fcard" style="--fc:' + c + '"><div class="fc-top"><b>' + esc(f.who) + '</b><span class="fc-no">' + esc(f.flight) + (isTest(f) ? " (test: " + esc(csOf(f)) + ")" : "") + '</span><span class="tag status ' + s.c + '">' + esc(s.label) + "</span></div>" +
         '<div class="fc-route"><div class="fc-end"><span class="ap">' + f.from + '</span><span class="tm">' + esc(tz(f.etd)) + '</span><span class="lb">ETD</span></div>' +
         '<div class="fc-bar" aria-hidden="true"><i style="width:' + pct + '%"></i><span class="pl" style="left:' + pct + '%">' + ICON.plane + "</span></div>" +
         '<div class="fc-end"><span class="ap">' + f.to + '</span><span class="tm">' + esc(tz(f.eta)) + '</span><span class="lb">ETA</span></div></div>' +
@@ -1026,7 +1114,7 @@ window.KXO_BOOT = function () {
       ? '<div class="radar"><iframe src="' + esc(radarUrl(list, w)) + '" title="Live radar of our flights" loading="lazy" referrerpolicy="no-referrer"></iframe></div>' +
         '<div class="fly-note">The real planes, live, from adsb.lol\'s volunteer receivers, showing only our ' + list.length + ' flights. A plane appears once its transponder is on (at the gate or taxiing), so before then the map is empty. <a href="' + esc(radarUrl(list, 1100)) + '" target="_blank" rel="noopener">Open full screen</a></div>'
       : '<div id="fmap" class="lmap fmap" aria-label="Flight route map"></div>' +
-        '<div class="fly-note">Planes move on the schedule clock, which shows who\'s where. For delays and gates, use FlightAware. For the real plane, switch to Live radar.</div>';
+        '<div class="fly-note fly-live" id="flylive">' + liveStatusHtml(dir) + "</div>";
     return '<div class="view-anim fly"><div class="day-head"><div class="kicker">Live flight map · ' + (dir === "arr" ? "Wed, Nov 25" : "Sat, Nov 28") + '</div><h2 class="headline">' + (dir === "arr" ? "Three flights in to SEA" : "Three flights home from SEA") + "</h2></div>" +
       '<div class="seg" role="tablist" aria-label="Which day"><button role="tab" data-go="fly-in" aria-selected="' + (r === "fly-in") + '">Wed arrivals</button><button role="tab" data-go="fly-out" aria-selected="' + (r === "fly-out") + '">Sat departures</button></div>' +
       '<div class="seg sub" role="tablist" aria-label="Map type"><button role="tab" data-flytab="route" aria-selected="' + (flyTab === "route") + '">Route map</button><button role="tab" data-flytab="radar" aria-selected="' + (flyTab === "radar") + '">Live radar<span class="livedot' + (live ? " on" : "") + '"></span></button></div>' +
@@ -1057,31 +1145,32 @@ window.KXO_BOOT = function () {
     fLayer.clearLayers();
     var t = now().getTime(), slots = {};
     flyList(FLYDIR[r]).forEach(function (f) {
-      var a = AP[f.from], b = AP[f.to], s = flyState(f, t), c = flyColor(f);
+      var a = AP[f.from], b = AP[f.to], s = flyNow(f, t), c = flyColor(f), lp = s.live;
       var pos = gcPoint(a, b, s.frac), ahead = gcPoint(a, b, Math.min(1, s.frac + 0.01)), behind = gcPoint(a, b, Math.max(0, s.frac - 0.01));
       var brg = s.frac >= 0.99 ? bearing(behind, pos) : bearing(pos, ahead);
-      L.polyline(gcLine(a, b, 0, 1), { color: c, weight: 2, opacity: 0.55, dashArray: "4 7", interactive: false }).addTo(fLayer);
-      if (s.frac > 0) L.polyline(gcLine(a, b, 0, s.frac), { color: c, weight: 3.5, opacity: 0.95, interactive: false }).addTo(fLayer);
+      if (lp) { pos = [lp.lat, lp.lon]; if (lp.trk != null) brg = lp.trk; }
+      L.polyline(gcLine(a, b, 0, 1), { color: c, weight: 2, opacity: lp ? 0.3 : 0.55, dashArray: "4 7", interactive: false }).addTo(fLayer);
+      if (lp && !lp.gnd) {
+        var P = { lat: lp.lat, lon: lp.lon }, tr = trails[csOf(f)] || [];
+        L.polyline(gcLine(P, b, 0, 1), { color: c, weight: 2.5, opacity: 0.8, dashArray: "4 7", interactive: false }).addTo(fLayer);
+        L.polyline(tr.length > 1 ? gcLine(a, { lat: tr[0][0], lon: tr[0][1] }, 0, 1).concat(tr) : gcLine(a, P, 0, 1), { color: c, weight: 3.5, opacity: 0.95, interactive: false }).addTo(fLayer);
+      } else if (s.frac > 0) L.polyline(gcLine(a, b, 0, s.frac), { color: c, weight: 3.5, opacity: 0.95, interactive: false }).addTo(fLayer);
       var key = pos[0].toFixed(2) + "," + pos[1].toFixed(2), slot = slots[key] = (slots[key] || 0) + 1;
-      var when = s.k === "air" ? "ETA " + tz(f.eta) : (s.k === "sched" || s.k === "soon") ? "ETD " + tz(f.etd) : "Arrived";
+      var when = lp ? (lp.gnd ? (s.k === "landed" ? "Landed" : "Taxiing") : "LIVE · " + liveLine(lp)) : s.k === "air" ? "ETA " + tz(f.eta) : (s.k === "sched" || s.k === "soon") ? "ETD " + tz(f.etd) : "Arrived";
       L.marker(pos, { keyboard: false, title: f.flight + ", " + f.who, zIndexOffset: s.k === "air" ? 1000 : 0, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
-        html: '<div class="fplane' + (s.k === "air" ? " air" : "") + '" style="--fc:' + c + '"><span class="fp-ico" style="transform:rotate(' + brg.toFixed(0) + 'deg)">' + ICON.plane + '</span><span class="flabel" style="top:' + ((slot - 1) * 34 - 10) + 'px"><b>' + esc(f.flight) + "</b> " + esc(f.who) + "<br>" + esc(when) + "</span></div>" }) }).addTo(fLayer);
+        html: '<div class="fplane' + (s.k === "air" ? " air" : "") + (lp ? " live" : "") + '" style="--fc:' + c + '"><span class="fp-ico" style="transform:rotate(' + brg.toFixed(0) + 'deg)">' + ICON.plane + '</span><span class="flabel" style="top:' + ((slot - 1) * 34 - 10) + 'px"><b>' + esc(f.flight) + "</b> " + esc(f.who) + "<br>" + esc(when) + "</span></div>" }) }).addTo(fLayer);
     });
   }
-  function stopFly() { if (flyTimer) { clearInterval(flyTimer); flyTimer = null; } if (fmap) { fmap.remove(); fmap = null; fLayer = null; } }
+  function stopFly() { if (flyTimer) { clearInterval(flyTimer); flyTimer = null; } if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } if (fmap) { fmap.remove(); fmap = null; fLayer = null; } }
   function startFly(r) {
     if (flyTab === "route") initFly(r);
-    flyTimer = setInterval(function () {
-      var rr = route(); if (!FLYDIR[rr]) return;
-      if (flyTab === "route") drawFlights(rr);
-      var c = document.getElementById("fcards"); if (c) c.innerHTML = fcardsHtml(FLYDIR[rr]);
-      var dot = document.querySelector(".livedot"); if (dot) dot.classList.toggle("on", flyAirborne(flyList(FLYDIR[rr]), now().getTime()));
-    }, 15000);
+    flyTimer = setInterval(flyRefresh, 15000);
+    if (liveOn()) { livePoll(); liveTimer = setInterval(livePoll, 30000); }
   }
   function flyBannerHtml() {
     var t = now().getTime(), act = K.FLIGHTS.filter(function (f) { return f.cs && t >= ms(f.dep) - 3 * 3600000 && t < ms(f.arr) + 45 * 60000; });
     if (!act.length) return "";
-    var air = act.filter(function (f) { return flyState(f, t).k === "air"; }).length;
+    var air = act.filter(function (f) { return flyNow(f, t).k === "air"; }).length;
     return '<button class="pk-banner fb" data-go="' + (act[0].dir === "arr" ? "fly-in" : "fly-out") + '"><span class="kicker">Live flight map</span><b>' +
       (air ? air + (air > 1 ? " flights" : " flight") + " in the air" : "Flight day") + "</b><span>" +
       act.map(function (f) { return esc(f.flight) + (f.dir === "arr" ? " lands " + esc(f.eta) : " departs " + esc(f.etd)); }).join(" · ") + " →</span></button>";
