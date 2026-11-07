@@ -516,3 +516,24 @@ body.locked > *:not(.gate) { display: none !important; }
 .pk-next .pk-ref { padding-top: 2px; }
 .court.big .pk-ref { font-size: clamp(14px, 1.4vw, 22px); }
 .pchip.open { background: transparent; border: 1px dashed var(--line); color: var(--muted); font-weight: 600; }
+/* website buttons next to Directions */
+a.dirbtn.web, .card a.dirbtn.web, .meta a.dirbtn.web { text-decoration: none; border-color: var(--line); color: var(--soft); }
+a.dirbtn.web:hover, .card a.dirbtn.web:hover { border-color: var(--text); color: var(--text); }
+.now-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.now-links .dirbtn { margin-top: 0; }
+.lpop-links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.lpop .lpop-links .dirbtn { margin-top: 0; }
+.lpop a.dirbtn.web { border-color: #0d1915; color: #0d1915; }
+/* pickleball schedule */
+.pk-sched { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+.pk-srow { display: grid; grid-template-columns: 74px 1fr; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.pk-srow:first-child { border-top: 0; }
+.pk-st { display: grid; align-content: start; line-height: 1.25; }
+.pk-st b { font: 700 14px var(--mono); }
+.pk-st span { font-size: 11.5px; color: var(--muted); }
+.pk-mu { font-weight: 700; font-size: 14.5px; }
+.pk-sm .pk-ref { padding-top: 4px; }
+.pk-srow.po { background: rgba(246, 196, 83, .06); }
+.pk-srow.po .pk-mu { color: var(--board); }
+.pk-srow.me { box-shadow: inset 3px 0 0 var(--ok); }
+.pk-srow.end .pk-mu { color: var(--board); }

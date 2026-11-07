@@ -43,7 +43,8 @@ window.KXO_BOOT = function () {
   var ICON = {
     pin: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>',
     out: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7h-2V6.4l-8.3 8.3-1.4-1.4L17.6 5H14V3ZM5 5h6v2H5v12h12v-6h2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg>',
-    plane: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5Z"/></svg>'
+    plane: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5Z"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.9 6h-3a15.6 15.6 0 0 0-1.4-3.6A8 8 0 0 1 18.9 8ZM12 4.1c.8 1.1 1.5 2.4 1.9 3.9h-3.8c.4-1.5 1.1-2.8 1.9-3.9ZM4.3 14a8.2 8.2 0 0 1 0-4h3.4a16.5 16.5 0 0 0 0 4H4.3Zm.8 2h3a15.6 15.6 0 0 0 1.4 3.6A8 8 0 0 1 5.1 16Zm3-8h-3a8 8 0 0 1 4.4-3.6A15.6 15.6 0 0 0 8.1 8ZM12 19.9c-.8-1.1-1.5-2.4-1.9-3.9h3.8c-.4 1.5-1.1 2.8-1.9 3.9Zm2.3-5.9H9.7a14.7 14.7 0 0 1 0-4h4.6a14.7 14.7 0 0 1 0 4Zm.3 5.6c.6-1.1 1.1-2.3 1.4-3.6h3a8 8 0 0 1-4.4 3.6Zm1.7-5.6a16.5 16.5 0 0 0 0-4h3.4a8.2 8.2 0 0 1 0 4h-3.4Z"/></svg>'
   };
   function appleUrl(p) { return "https://maps.apple.com/?daddr=" + encodeURIComponent(p.q) + "&dirflg=d"; }
   function googleUrl(p) { return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.q) + "&travelmode=driving"; }
@@ -67,7 +68,13 @@ window.KXO_BOOT = function () {
     c.textContent = ME ? "I'm " + ME : "Who are you?";
     c.classList.toggle("unset", !ME);
   }
-  function joined(act, name) { return !!name && Cloud.who(act).indexOf(name) >= 0; }
+  // Opt-out activities (pickleball): everyone is in unless they've tapped Undo (stored as "<act>-out").
+  function who(act) {
+    var a = ACTS[act];
+    if (a && a.optout) { var out = Cloud.who(act + "-out"); return ALLNAMES.filter(function (n) { return out.indexOf(n) < 0; }); }
+    return Cloud.who(act);
+  }
+  function joined(act, name) { return !!name && who(act).indexOf(name) >= 0; }
   function live() { return Cloud.state.mode === "firebase" || Cloud.state.mode === "mock"; }
 
   /* ---------- events (flattened) ---------- */
@@ -141,9 +148,9 @@ window.KXO_BOOT = function () {
 
   /* ---------- sign-ups ---------- */
   function whoHtml(actId, compact) {
-    var a = ACTS[actId], names = Cloud.who(actId), mine = joined(actId, ME);
+    var a = ACTS[actId], names = who(actId), mine = joined(actId, ME);
     var full = a.cap && names.length >= a.cap && !mine;
-    var label = a.kind === "driver" ? "Driver" : "Who's in";
+    var label = a.kind === "driver" ? "Driver" : a.optout ? "Who's in (everyone, unless you opt out)" : "Who's in";
     var empty = a.kind === "driver" ? "No driver yet" : a.kind === "dish" ? "Open" : "No one yet";
     var chips = names.length ? names.map(function (n) { return '<span class="pchip' + (n === ME ? " me" : "") + '">' + esc(n) + "</span>"; }).join("") : '<span class="none">' + empty + "</span>";
     if (a.kind === "dish" && a.cap > 1) { // show every spot, so it's obvious two people can share a dish
@@ -156,27 +163,36 @@ window.KXO_BOOT = function () {
     else if (!live()) btn = '<span class="soon">Sign-ups open soon</span>';
     else if (mine) btn = '<button class="joinbtn on" data-leave="' + actId + '">' + (a.kind === "driver" ? "You're driving · Undo" : a.kind === "dish" ? "You're making it · Undo" : "You're in · Undo") + "</button>";
     else if (full) btn = '<button class="joinbtn" disabled>Full</button>';
-    else btn = '<button class="joinbtn" data-join="' + actId + '">' + (a.kind === "driver" ? "I'll drive" : a.kind === "dish" ? (names.length ? "Join " + esc(names[0]) : "I'll make it") : "I'm in") + "</button>";
+    else btn = '<button class="joinbtn" data-join="' + actId + '">' + (a.kind === "driver" ? "I'll drive" : a.kind === "dish" ? (names.length ? "Join " + esc(names[0]) : "I'll make it") : a.optout ? "Count me back in" : "I'm in") + "</button>";
+    if (a.optout && !ME) btn = '<button class="joinbtn" data-pickme="1">Everyone\'s in. Not playing? Tell us who you are</button>';
     return '<div class="who' + (compact ? " compact" : "") + '">' + (compact ? "" : '<div class="who-top"><span class="sec-label">' + label + "</span>" + count + "</div>") +
       '<div class="pchips">' + chips + "</div>" + btn + "</div>";
   }
   function doJoin(act) {
     if (!ME) { pickMe(function () { doJoin(act); }); return; }
-    var a = ACTS[act], who = Cloud.who(act);
-    if (a.cap && who.length >= a.cap && who.indexOf(ME) < 0) { toast("That one's full."); return; }
+    var a = ACTS[act], cur = who(act);
+    if (a.cap && cur.length >= a.cap && cur.indexOf(ME) < 0) { toast("That one's full."); return; }
+    if (a.optout) { Cloud.leave(act + "-out", ME).then(function () { toast("You're back in, " + ME + "!"); }, function () { toast("Couldn't save that. Check your connection."); }); return; }
     Cloud.join(act, ME).then(function () { toast(a.kind === "driver" ? "Thanks for driving, " + ME + "!" : a.kind === "dish" ? "Thanks, " + ME + "! You're on " + (a.short || a.title).toLowerCase() + "." : "You're in, " + ME + "!"); }, function () { toast("Couldn't save that. Check your connection."); });
   }
-  function doLeave(act) { if (!ME) return; Cloud.leave(act, ME).catch(function () { toast("Couldn't save that. Check your connection."); }); }
+  function doLeave(act) {
+    if (!ME) return;
+    if (ACTS[act] && ACTS[act].optout) { Cloud.join(act + "-out", ME).then(function () { toast("Got it, you're sitting this one out. Tap to rejoin anytime."); }, function () { toast("Couldn't save that. Check your connection."); }); return; }
+    Cloud.leave(act, ME).catch(function () { toast("Couldn't save that. Check your connection."); });
+  }
 
   /* ---------- item + day renderers ---------- */
   function placeChip(key) {
     var p = PL[key];
     if (!p) return '<span class="tag">' + esc(key) + "</span>";
-    return '<button class="dirbtn" data-place="' + key + '">' + ICON.pin + 'Directions <span class="dt">' + esc(p.drive) + "</span></button>";
+    return '<button class="dirbtn" data-place="' + key + '">' + ICON.pin + 'Directions <span class="dt">' + esc(p.drive) + "</span></button>" + webBtn(p);
+  }
+  function webBtn(p, cls) {
+    return p && p.web ? '<a class="dirbtn web' + (cls ? " " + cls : "") + '" href="' + esc(p.web) + '" target="_blank" rel="noopener">' + ICON.globe + esc(p.webLabel || "Website") + "</a>" : "";
   }
   function statusTag(s) { return s ? '<span class="tag status ' + s[0] + '">' + esc(s[1]) + "</span>" : ""; }
-  function ownsStep(it, name) { if (!it.owner || !name) return false; if (it.owner === name) return true; var r = K.OWNER_ROLE[it.owner]; return !!r && Cloud.who(r).indexOf(name) >= 0; }
-  function ownerLabel(o) { var r = K.OWNER_ROLE[o]; if (!r) return o; var n = Cloud.who(r); return n.length ? o + ": " + n.join(" + ") : o + ": open"; }
+  function ownsStep(it, name) { if (!it.owner || !name) return false; if (it.owner === name) return true; var r = K.OWNER_ROLE[it.owner]; return !!r && who(r).indexOf(name) >= 0; }
+  function ownerLabel(o) { var r = K.OWNER_ROLE[o]; if (!r) return o; var n = who(r); return n.length ? o + ": " + n.join(" + ") : o + ": open"; }
 
   function itemHtml(it, isNext) {
     var cls = "item" + (it.feature ? " feature" : "") + (isNext ? " next" : "");
@@ -189,7 +205,7 @@ window.KXO_BOOT = function () {
     if (it.todo) h += '<div class="sec"><div class="sec-label">Need to do</div><div class="todos">' + it.todo.map(function (t) { return '<a class="btn-todo" href="' + esc(t[1]) + '" target="_blank" rel="noopener">' + esc(t[0]) + ICON.out + "</a>"; }).join("") + "</div></div>";
     if (it.notes) h += '<ul class="notes">' + it.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>";
     if (it.menu) h += '<div class="menu-title">On the table · who\'s making it</div><ul class="menu">' + it.menu.map(function (m) {
-      var cooks = m[2] && ACTS[m[2]] ? Cloud.who(m[2]) : null;
+      var cooks = m[2] && ACTS[m[2]] ? who(m[2]) : null;
       return "<li>" + esc(m[0]) + (m[1] ? '<span class="veg">VEG</span>' : "") + (cooks ? '<span class="cook' + (cooks.length ? "" : " open") + '">' + (cooks.length ? esc(cooks.join(" + ")) : "open") + "</span>" : "") + "</li>";
     }).join("") + '</ul><button class="linkbtn menu-go" data-go="prep">Sign up for a dish →</button>';
     if (it.act) h += whoHtml(it.act);
@@ -216,7 +232,7 @@ window.KXO_BOOT = function () {
     return '<div class="board" data-board="' + dir + '" role="table" aria-label="' + (dir === "arr" ? "SEA arrivals" : "SEA departures") + '"><div class="board-title">' + ICON.plane + (dir === "arr" ? "SEA Arrivals" : "SEA Departures") + '<button class="board-live" data-go="' + (dir === "arr" ? "fly-in" : "fly-out") + '">Live map →</button></div>' +
       '<div class="board-cols"><span>WHO</span><span>' + (dir === "arr" ? "LANDS" : "DEPARTS") + "</span></div>" +
       rows.map(function (f) {
-        var drv = Cloud.who(f.drive)[0];
+        var drv = who(f.drive)[0];
         return '<div class="board-row" role="row"><div class="flaprow" aria-label="' + esc(f.who + ", " + f.time) + '">' + flaps(f.who.replace(/ /g, ""), 10) + flaps(f.time, 7, true) + "</div>" +
           '<div class="board-sub"><span>' + (f.flight ? esc(f.flight.toUpperCase()) + (f.from ? " · " + f.from + "→" + f.to : "") : "Flight # coming") + " · Driver: " + (drv ? esc(drv) : "TBD") + "</span>" +
           '<a class="track" href="' + trackUrl(f) + '" target="_blank" rel="noopener">' + (f.flight ? "Track flight" : "Live SEA board") + "</a></div></div>";
@@ -280,7 +296,7 @@ window.KXO_BOOT = function () {
     if (cur) h += '<div class="now-row"><span class="now-tag live">Now</span><div><div class="now-title">' + esc(cur.it.title) + '</div><div class="now-sub">until ' + clock(new Date(cur.e)) + "</div></div></div>";
     if (nxt) {
       h += '<div class="now-row"><span class="now-tag">Next</span><div><div class="now-title">' + esc(nxt.it.title) + '</div><div class="now-sub">' + nxt.d.dow + " " + esc(nxt.it.t) + ' · <b data-until="' + nxt.s + '" data-fmt="in">' + inText(nxt.s - t) + "</b>" +
-        (nxt.it.leave ? " · leave " + esc(nxt.it.leave) : "") + "</div>" + (PL[nxt.it.place] ? '<button class="dirbtn" data-place="' + nxt.it.place + '">' + ICON.pin + "Directions</button>" : "") + "</div></div>";
+        (nxt.it.leave ? " · leave " + esc(nxt.it.leave) : "") + "</div>" + (PL[nxt.it.place] ? '<div class="now-links"><button class="dirbtn" data-place="' + nxt.it.place + '">' + ICON.pin + "Directions</button>" + webBtn(PL[nxt.it.place]) + "</div>" : "") + "</div></div>";
     }
     if (!cur && !nxt) h += '<div class="now-sub">Nothing else on the schedule. Enjoy it.</div>';
     var k = kitchenStep(t);
@@ -307,7 +323,7 @@ window.KXO_BOOT = function () {
     var rows = [];
     K.FLIGHTS.forEach(function (f) {
       if (f.people.indexOf(ME) < 0) return;
-      var drv = Cloud.who(f.drive)[0];
+      var drv = who(f.drive)[0];
       rows.push({ s: ms(f.at), when: (f.dir === "arr" ? "Wed " : "Sat ") + f.time, txt: (f.dir === "arr" ? "You land at SEA" : "Your flight leaves SEA") + (f.flight ? " · " + f.flight.toUpperCase() : ""), tag: drv ? "Driver: " + drv : "Driver TBD", c: drv ? "ok" : "wait" });
     });
     EVENTS.forEach(function (e) {
@@ -325,7 +341,7 @@ window.KXO_BOOT = function () {
     if (todos.length) h += '<div class="sec"><div class="sec-label">Need to do</div><div class="todos">' + todos.map(function (id) { var t = ACTS[id].todo; return '<a class="btn-todo" href="' + esc(t[1]) + '" target="_blank" rel="noopener">' + esc(t[0]) + ICON.out + "</a>"; }).join("") + "</div></div>";
     if (open.length) {
       h += '<div class="sec"><div class="sec-label">Want in?</div>' + (live()
-        ? '<div class="mw-chips">' + open.map(function (id) { var a = ACTS[id], full = a.cap && Cloud.who(id).length >= a.cap; return '<button class="joinbtn small" data-join="' + id + '"' + (full ? " disabled" : "") + ">+ " + esc(a.title) + " · " + esc(a.when) + (full ? " (full)" : "") + "</button>"; }).join("") + "</div>"
+        ? '<div class="mw-chips">' + open.map(function (id) { var a = ACTS[id], full = a.cap && who(id).length >= a.cap; return '<button class="joinbtn small" data-join="' + id + '"' + (full ? " disabled" : "") + ">+ " + esc(a.title) + " · " + esc(a.when) + (full ? " (full)" : "") + "</button>"; }).join("") + "</div>"
         : '<span class="soon">Sign-ups open soon</span>') + "</div>";
     }
     return h + "</section>";
@@ -398,7 +414,7 @@ window.KXO_BOOT = function () {
       var p = PL[key];
       L.marker([p.lat, p.lon], { title: p.name, icon: L.divIcon({ className: "", html: '<span class="lpin">' + p.n + "</span>", iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12] }) })
         .addTo(lmap)
-        .bindPopup('<div class="lpop"><b>' + esc(p.name) + "</b><span>" + esc(p.when) + "</span><span>" + esc(p.drive) + ' from home</span><button class="dirbtn" data-popplace="' + key + '">Directions</button></div>');
+        .bindPopup('<div class="lpop"><b>' + esc(p.name) + "</b><span>" + esc(p.when) + "</span><span>" + esc(p.drive) + ' from home</span><span class="lpop-links"><button class="dirbtn" data-popplace="' + key + '">Directions</button>' + webBtn(p) + "</span></div>");
     });
     lmap.on("popupopen", function (e) {
       var b = e.popup.getElement().querySelector("[data-popplace]");
@@ -418,7 +434,7 @@ window.KXO_BOOT = function () {
     var clockCard = today() === "2026-11-26"
       ? '<div class="now" id="kclock">' + kitchenClockInner() + "</div>"
       : (t < ms("2026-11-26T00:00") ? '<div class="teaser">On Thanksgiving morning this becomes a live kitchen clock: what\'s happening now, who\'s on it, and a countdown to the next step.</div>' : "");
-    var dishes = Object.keys(ACTS).filter(function (id) { return ACTS[id].kind === "dish"; }), taken = dishes.filter(function (id) { return Cloud.who(id).length; }).length;
+    var dishes = Object.keys(ACTS).filter(function (id) { return ACTS[id].kind === "dish"; }), taken = dishes.filter(function (id) { return who(id).length; }).length;
     var roles = '<div class="roles"><div class="menu-title">Who\'s making what · ' + taken + " of " + dishes.length + ' dishes claimed</div><div class="role-what"><b>Two people can sign up for each dish:</b> pair up, or split it (one preps ahead, one cooks Thursday). You own it start to finish, and your steps show up in the run sheet below and on your Highlights.</div>' +
       dishes.map(function (id) {
         var a = ACTS[id];
@@ -477,7 +493,7 @@ window.KXO_BOOT = function () {
   var PK = "pickle", COURTS = [["c1", "Indoor 6"], ["c2", "Indoor 7"]], SLOT_MIN = 15, BUDGET_MIN = 135;
   var pkResetArmed = false, pkResetTimer = null, pkEditing = {}, celebrated = {}, pkSel = null;
   function pkGame() { var g = Cloud.game(PK); return g && g.v === 2 ? g : {}; }
-  function pkPlayers() { return Cloud.who("pickle"); }
+  function pkPlayers() { return who("pickle"); }
   function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
   function names(a) { return (a || []).map(esc).join(" + "); }
   function getPath(o, path) { return path.split("/").reduce(function (x, k) { return x == null ? x : x[k]; }, o); }
@@ -614,15 +630,78 @@ window.KXO_BOOT = function () {
     }
     return '<div class="court' + (big ? " big" : "") + (x.ph === "final" ? " final" : "") + '"><div class="court-h">' + esc(label) + " · " + PH[x.ph] + "</div>" + side(x.a, sa, "sa", sa > sb) + '<div class="vs">vs</div>' + side(x.b, sb, "sb", sb > sa) + refHtml(g, x, !big && !done) + foot + "</div>";
   }
-  function refHtml(g, x, canEdit) {
-    var who = x.ref || "", mine = !!ME && who === ME;
-    if (!canEdit) return who ? '<div class="pk-ref' + (mine ? " me" : "") + '">Scorekeeper <b>' + esc(who) + "</b></div>" : "";
-    var out = inGame(g, x);
+  function refHtml(g, x, canEdit, base, busy) {
+    var rk = x.ref || "", mine = !!ME && rk === ME;
+    if (!canEdit) return rk ? '<div class="pk-ref' + (mine ? " me" : "") + '">Scorekeeper <b>' + esc(rk) + "</b></div>" : "";
+    var out = inGame(g, x).concat(busy || []);
     if (x.court) pkList(g.sched).forEach(function (y) { if (y.court && !y.done && y.key !== x.key) out = out.concat(inGame(g, y), y.ref ? [y.ref] : []); }); // busy on the other court right now
-    var opts = pkPool(g).filter(function (n) { return out.indexOf(n) < 0 || n === who; });
+    var opts = pkPool(g).filter(function (n) { return out.indexOf(n) < 0 || n === rk; });
     if (!opts.length) return '<div class="pk-ref muted">No one free, so the players keep score</div>';
-    return '<label class="pk-ref' + (mine ? " me" : "") + '"><span>' + (mine ? "You're keeping score" : "Scorekeeper") + '</span><select data-pkref="' + x.key + '" aria-label="Scorekeeper for this game">' +
-      (who ? "" : '<option value="">Pick someone</option>') + opts.map(function (n) { return "<option" + (n === who ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") + "</select></label>";
+    return '<label class="pk-ref' + (mine ? " me" : "") + '"><span>' + (mine ? "You're keeping score" : "Scorekeeper") + '</span><select data-pkref="' + x.key + '" data-pkbase="' + (base || "sched") + '" aria-label="Scorekeeper for this game">' +
+      (rk ? "" : '<option value="">Pick someone</option>') + opts.map(function (n) { return "<option" + (n === rk ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") + "</select></label>";
+  }
+  /* the whole tournament laid out: est. time, court, matchup, scorekeeper */
+  var PK_T0 = "2026-11-27T11:00";
+  function pkTimeline(games, t0) { // 2 courts, 15-min slots, no team twice in a slot; mirrors how courts pull games
+    var slots = [], rows = [];
+    games.forEach(function (x) {
+      for (var sI = 0; ; sI++) {
+        var sl = slots[sI] = slots[sI] || [];
+        if (sl.length < 2 && !sl.some(function (y) { return y.a === x.a || y.a === x.b || y.b === x.a || y.b === x.b; })) { sl.push(x); rows.push({ x: x, t: t0 + sI * SLOT_MIN * 60000, court: COURTS[sl.length - 1][1], slot: sI }); break; }
+      }
+    });
+    return { rows: rows, slots: slots.length };
+  }
+  function pkBuildPlan(teams) { // pool games + a scorekeeper for each, ready before the first serve
+    var g = { teams: teams }, ids = tIds(g); if (ids.length < 2) return null;
+    var plan = {}; pkPlan(ids).list.forEach(function (m, i) { plan["g" + (i < 9 ? "0" : "") + (i + 1)] = newGame(m[0], m[1], "pool", i + 1, ""); });
+    var list = pkList(plan), tl = pkTimeline(list, 0), pool = pkPool(g), load = {};
+    tl.rows.forEach(function (r) { // hard: not in this game · soft: not in the game on the other court at the same time
+      var other = tl.rows.filter(function (q) { return q.slot === r.slot && q.x !== r.x; }).map(function (q) { return q.x; })[0];
+      plan[r.x.key].ref = pickRef(pool, inGame(g, r.x), inGame(g, other), load);
+    });
+    return plan;
+  }
+  function pkSchedRow(g, x, t, court, label, base, edit, note, busy) {
+    var me = !!ME && (inGame(g, x).indexOf(ME) >= 0 || x.ref === ME);
+    return '<li class="pk-srow' + (me ? " me" : "") + (x.ph !== "pool" ? " po" : "") + '"><div class="pk-st"><b>' + (t ? "~" + clock(new Date(t)) : "") + "</b><span>" + esc(court || "") + '</span></div><div class="pk-sm"><div class="pk-mu">' + label + "</div>" +
+      (note ? '<div class="pk-ref muted">' + note + "</div>" : refHtml(g, x, edit, base, busy)) + "</div></li>";
+  }
+  function pkScheduleHtml(g, mode) { // mode: "format" (no teams yet) · "plan" (teams drawn) · "live" (started)
+    var t0 = ms(PK_T0), h = "", rows, T, tl;
+    if (mode === "format") {
+      T = Math.floor(pkPlayers().length / 2); if (T < 2) return "";
+      var ids = []; for (var i = 1; i <= T; i++) ids.push("t" + i);
+      var fake = { teams: {} }; ids.forEach(function (id) { fake.teams[id] = { p: [] }; });
+      tl = pkTimeline(pkPlan(ids).list.map(function (m, i) { return { a: m[0], b: m[1], ph: "pool", key: "f" + i }; }), t0);
+      rows = tl.rows.map(function (r) { return pkSchedRow(fake, r.x, r.t, r.court, "Team " + r.x.a.slice(1) + ' <span class="muted">vs</span> Team ' + r.x.b.slice(1), "", false, "Scorekeeper: drawn with the teams"); });
+    } else {
+      var src = mode === "plan" ? pkList(g.plan) : pkList(g.sched).filter(function (x) { return !x.done && !x.court && x.ph === "pool"; });
+      T = tIds(g).length;
+      var start = mode === "plan" ? t0 : now().getTime() + (pkList(g.sched).some(function (x) { return x.court && !x.done; }) ? SLOT_MIN * 30000 : 0);
+      tl = pkTimeline(src, start); t0 = start;
+      rows = tl.rows.map(function (r) {
+        var mate = tl.rows.filter(function (q) { return q.slot === r.slot && q.x !== r.x; }).map(function (q) { return q.x; })[0]; // same time, other court
+        var busy = mate ? inGame(g, mate).concat(mate.ref ? [mate.ref] : []) : [];
+        return pkSchedRow(g, r.x, r.t, r.court, tName(g, r.x.a) + ' <span class="muted">vs</span> ' + tName(g, r.x.b), mode === "plan" ? "plan" : "sched", true, "", busy);
+      });
+      if (mode === "live") { // playoffs already created show up with the queued games
+        pkList(g.sched).filter(function (x) { return !x.done && !x.court && x.ph !== "pool"; }).forEach(function (x) { rows.push(pkSchedRow(g, x, 0, "", PH[x.ph] + ": " + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b), "sched", true)); });
+      }
+    }
+    var hasSemi = mode === "live" && pkList(g.sched).some(function (x) { return x.ph !== "pool"; });
+    if (!hasSemi) {
+      var tp = t0 + tl.slots * SLOT_MIN * 60000, noteP = "Scorekeeper: picked when the bracket fills in";
+      if (T >= 4) {
+        rows.push(pkSchedRow({}, { ph: "semi" }, tp, COURTS[0][1], "Semifinal: #1 seed vs #4 seed", "", false, noteP));
+        rows.push(pkSchedRow({}, { ph: "semi" }, tp, COURTS[1][1], "Semifinal: #2 seed vs #3 seed", "", false, noteP));
+        rows.push(pkSchedRow({}, { ph: "final" }, tp + SLOT_MIN * 60000, COURTS[0][1], "Final: the two semifinal winners", "", false, noteP));
+      } else if (T === 3) rows.push(pkSchedRow({}, { ph: "final" }, tp, COURTS[0][1], "Final: #1 seed vs #2 seed", "", false, noteP));
+      var end = tp + (T >= 4 ? 2 : T === 3 ? 1 : 0) * SLOT_MIN * 60000;
+      if (rows.length) rows.push('<li class="pk-srow end"><div class="pk-st"><b>~' + clock(new Date(end)) + '</b></div><div class="pk-sm"><div class="pk-mu">Champions crowned 🏆</div></div></li>');
+    }
+    if (!rows.length) return "";
+    return '<ol class="pk-sched">' + rows.join("") + "</ol>";
   }
   function champHtml(team) {
     return '<div class="champ"><div class="kicker">Pickleball champions</div><div class="champ-names">' + names(team) + '</div><div class="muted small">Bragging rights until next Thanksgiving.</div></div>';
@@ -654,7 +733,7 @@ window.KXO_BOOT = function () {
     var out = {}, n = 0;
     teams.forEach(function (t) { if (t.length) out["t" + (++n)] = { p: t }; });
     pkSel = null;
-    Cloud.gameSet(PK, { v: 2, teams: out, at: g.at || Date.now() }).catch(function () { toast("Couldn't save that. Check your connection."); });
+    Cloud.gameSet(PK, { v: 2, teams: out, at: g.at || Date.now(), plan: pkBuildPlan(out) }).catch(function () { toast("Couldn't save that. Check your connection."); });
   }
   function pkFind(slots, name) {
     for (var i = 0; i < slots.teams.length; i++) { var j = slots.teams[i].indexOf(name); if (j >= 0) return { t: i, j: j }; }
@@ -702,7 +781,11 @@ window.KXO_BOOT = function () {
 
     if (!ids.length) {
       h += '<div class="sec" style="margin-top:14px"><div class="who-top"><span class="sec-label">Players</span><span class="cap">' + players.length + "</span></div>" + whoHtml("pickle", true) + "</div>";
-      if (players.length >= 4) { var est = pkPlan(Array.apply(null, Array(Math.floor(players.length / 2))).map(function (_, i) { return "t" + (i + 1); })); h += '<p class="muted small">' + Math.floor(players.length / 2) + " teams · each plays " + perTeam(est.list) + " pool games · about " + dur(est.mins) + " total</p>"; }
+      if (players.length >= 4) {
+        var est = pkPlan(Array.apply(null, Array(Math.floor(players.length / 2))).map(function (_, i) { return "t" + (i + 1); }));
+        h += '<p class="muted small">' + Math.floor(players.length / 2) + " teams · each plays " + perTeam(est.list) + " pool games · about " + dur(est.mins) + " total</p>";
+        h += '<h3 class="sec-head">How the day runs</h3><p class="muted small">Times assume a start at 11:00a. Real names and scorekeepers fill in when the teams are drawn.</p>' + pkScheduleHtml(g, "format");
+      }
       if (!open) h += '<div class="teaser">Teams get drawn at the courts on Friday.</div>';
       else if (players.length < 4) h += '<div class="teaser">Need at least 4 players. ' + players.length + " signed up so far.</div>";
       else h += '<div class="map-tools"><button class="btn-todo" data-pk="draw">Draw teams</button></div>';
@@ -715,6 +798,7 @@ window.KXO_BOOT = function () {
     if (!L.length) {
       var plan = pkPlan(ids);
       h += '<p class="muted small" style="margin-top:10px">' + ids.length + " teams · each plays " + perTeam(plan.list) + " pool games · about " + dur(plan.mins) + " including the playoffs</p>";
+      if (g.plan) h += '<h3 class="sec-head">Schedule + scorekeepers</h3><p class="muted small">Times assume an 11:00a start. Courts pull the next game as soon as one finishes. Tap a scorekeeper to swap.</p>' + pkScheduleHtml(g, "plan");
       h += '<div class="map-tools">' + (open ? '<button class="btn-todo" data-pk="start">Start the tournament</button><button class="maplink" data-pk="draw">Redraw teams</button>' : "") + '<button class="maplink" data-go="pickle-tv">Show on the TV</button></div>';
     } else {
       if (!champs) {
@@ -723,8 +807,8 @@ window.KXO_BOOT = function () {
           var x = L.filter(function (y) { return y.court === c[0] && !y.done; })[0];
           return x ? courtHtml(g, x, c[1]) : '<div class="court idle"><div class="court-h">' + c[1] + '</div><span class="muted small">Free</span></div>';
         }).join("");
-        var nextUp = L.filter(function (x) { return !x.done && !x.court; }).slice(0, 4);
-        if (nextUp.length) h += '<h3 class="sec-head">Up next</h3><ol class="pk-next">' + nextUp.map(function (x) { return "<li><div>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + "</div>" + refHtml(g, x, true) + "</li>"; }).join("") + "</ol>";
+        var sch = pkScheduleHtml(g, "live");
+        if (sch) h += '<h3 class="sec-head">Coming up</h3>' + sch;
       }
       h += '<div class="map-tools"><button class="maplink" data-go="pickle-tv">Show on the TV</button></div>';
       h += '<h3 class="sec-head">Standings</h3>' + standingsHtml(g);
@@ -763,23 +847,20 @@ window.KXO_BOOT = function () {
     else if (act === "draw") {
       pkSel = null;
       var pl = pkPlayers(); if (pl.length < 4) { toast("Need at least 4 players."); return; }
-      Cloud.gameSet(PK, { v: 2, teams: pkDraw(pl), at: Date.now() }).catch(function () { toast("Couldn't save that. Check your connection."); }); return;
+      var dt = pkDraw(pl);
+      Cloud.gameSet(PK, { v: 2, teams: dt, at: Date.now(), plan: pkBuildPlan(dt) }).catch(function () { toast("Couldn't save that. Check your connection."); }); return;
     }
     else if (act === "start") {
       var ids = tIds(g);
       if (ids.some(function (id) { return g.teams[id].p.length < 2; })) { toast("Every team needs at least 2 players."); return; }
       if (ids.length < 2) { toast("Need at least 2 teams."); return; }
       pkSel = null;
-      var plan = pkPlan(ids), sched = {};
-      plan.list.forEach(function (m, i) { sched["g" + (i < 9 ? "0" : "") + (i + 1)] = newGame(m[0], m[1], "pool", i + 1, ""); });
-      var list = pkList(sched), pool = pkPool(g), load = {};
-      list.forEach(function (x, i) { // random + even; softly avoid players in the neighbouring games (likely on the other court)
-        var soft = inGame(g, list[i - 1]).concat(inGame(g, list[i + 1]));
-        x.ref = sched[x.key].ref = pickRef(pool, inGame(g, x), soft, load);
-      });
+      var plan = pkPlan(ids), sched = g.plan ? JSON.parse(JSON.stringify(g.plan)) : pkBuildPlan(g.teams);
+      var list = pkList(sched), pool = pkPool(g), load = refLoad(list);
+      list.forEach(function (x) { if (!x.ref || pool.indexOf(x.ref) < 0) { if (x.ref) load[x.ref]--; x.ref = pickRef(pool, inGame(g, x), [], load); } }); // anyone who dropped out gets replaced
       COURTS.forEach(function (c) { var x = nextFor(list, c[0]); if (x) { x.court = c[0]; refFix(g, list, x, {}); } });
       list.forEach(function (x) { sched[x.key].court = x.court; sched[x.key].ref = x.ref; });
-      up.sched = sched; up.startedAt = Date.now(); up.est = plan.mins;
+      up.sched = sched; up.plan = null; up.startedAt = Date.now(); up.est = plan.mins;
     }
     else if (act === "done") {
       var court = btn.getAttribute("data-court"), list2 = pkList(g.sched);
@@ -1132,7 +1213,7 @@ window.KXO_BOOT = function () {
   function fcardsHtml(dir) {
     var t = now().getTime();
     return flyList(dir).map(function (f) {
-      var s = flyNow(f, t), c = flyColor(f), drv = Cloud.who(f.drive)[0], pct = (s.frac * 100).toFixed(1), lp = s.live;
+      var s = flyNow(f, t), c = flyColor(f), drv = who(f.drive)[0], pct = (s.frac * 100).toFixed(1), lp = s.live;
       var line = lp ? (lp.gnd ? (s.k === "landed" ? (f.dir === "arr" ? "On the ground at " + f.to + ". Head to arrivals." : "Landed in " + f.to + ".") : "On the ground at " + f.from + ", taxiing or at the gate.") : liveLine(lp))
         : s.k === "sched" ? "Departs " + tz(f.etd) + " · lands " + tz(f.eta)
         : s.k === "soon" ? 'Wheels up <b data-until="' + s.d + '" data-fmt="in">' + inText(s.d - t) + "</b>"
@@ -1303,7 +1384,8 @@ window.KXO_BOOT = function () {
     document.getElementById("sheet-links").innerHTML =
       '<a class="maplink primary" href="' + appleUrl(p) + '" target="_blank" rel="noopener">Apple Maps</a>' +
       '<a class="maplink" href="' + googleUrl(p) + '" target="_blank" rel="noopener">Google Maps</a>' +
-      '<button class="maplink" data-copy="' + key + '">Copy address</button>';
+      '<button class="maplink" data-copy="' + key + '">Copy address</button>' +
+      (p.web ? '<a class="maplink" href="' + esc(p.web) + '" target="_blank" rel="noopener">' + esc(p.webLabel || "Website") + "</a>" : "");
     scrim.hidden = false;
     document.getElementById("sheet-close").focus();
   }
@@ -1373,7 +1455,7 @@ window.KXO_BOOT = function () {
   });
   document.addEventListener("change", function (e) {
     var sel = e.target.closest && e.target.closest("[data-pkref]"); if (!sel || !sel.value) return;
-    var up = {}; up["sched/" + sel.getAttribute("data-pkref") + "/ref"] = sel.value;
+    var up = {}; up[(sel.getAttribute("data-pkbase") || "sched") + "/" + sel.getAttribute("data-pkref") + "/ref"] = sel.value;
     Cloud.gameUpdate(PK, up).then(function () { toast(sel.value + " is keeping score."); }, function () { toast("Couldn't save that. Check your connection."); });
   });
   document.addEventListener("input", function (e) {
