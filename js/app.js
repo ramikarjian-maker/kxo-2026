@@ -428,17 +428,20 @@ window.KXO_BOOT = function () {
     pts.push([K.HOME.lat, K.HOME.lon]);
     fitSized(lmap, pts, { padding: [28, 28] });
   }
-  // Leaflet picks max zoom when it fits bounds in a zero-size box (page drawn before layout, tab restored from background).
-  // Fit now if the map has a size; otherwise re-fit once it gets one.
+  // Fitting bounds inside a zero-size box (page drawn before layout, tab restored from background) fails and
+  // leaves the map stuck at max zoom. Fit now if the map has a size; otherwise park it and fit once it gets one.
   function fitSized(m, pts, opts) {
     var el = m.getContainer(), ok = function () { return el.isConnected && el.clientWidth > 0 && el.clientHeight > 0; };
-    m.fitBounds(pts, opts);
-    if (ok()) return;
+    if (ok()) { m.fitBounds(pts, opts); return; }
+    try { m.setView(L.latLngBounds(pts).getCenter(), 4, { animate: false }); } catch (e) {}
     var ro = null, done = false, stop = function () { done = true; if (ro) ro.disconnect(); };
     var go = function () { if (done || !ok()) return; stop(); m.invalidateSize(false); m.fitBounds(pts, opts); };
     m.once("unload", stop);
-    if (window.ResizeObserver) { ro = new ResizeObserver(go); ro.observe(el); } else setTimeout(go, 400);
+    // ResizeObserver doesn't always report here, so a light poll backs it up; both stop on the first good fit or when the map is removed.
+    if (window.ResizeObserver) { ro = new ResizeObserver(go); ro.observe(el); }
+    var tries = 0, poll = setInterval(function () { if (done || ++tries > 1200) clearInterval(poll); else go(); }, 500);
   }
+
 
 
   function prepView() {
