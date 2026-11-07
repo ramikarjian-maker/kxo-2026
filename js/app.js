@@ -966,6 +966,7 @@ window.KXO_BOOT = function () {
     OAK: { city: "Oakland", lat: 37.7126, lon: -122.2197 }
   };
   var FLYCOL = ["#f6c453", "#e45b6b", "#7cc8f2"];
+  var APCHIP = { SEA: "above", OAK: "right", LAX: "below", STL: "below" }; // label side, so West Coast chips don't collide
   var FLYDIR = { "fly-in": "arr", "fly-out": "dep" };
   var flyTab = Q.get("radar") ? "radar" : "route", fmap = null, fLayer = null, flyTimer = null;
   function flyList(dir) { return K.FLIGHTS.filter(function (f) { return f.dir === dir && f.cs && AP[f.from] && AP[f.to]; }); }
@@ -1134,17 +1135,18 @@ window.KXO_BOOT = function () {
       var sub = hub ? "" : rows.map(function (x) { return '<small style="color:' + flyColor(x.f) + '">' + (x.end === "from" ? "ETD " + esc(tz(x.f.etd)) : "ETA " + esc(tz(x.f.eta))) + "</small>"; }).join("");
       pts.push([p.lat, p.lon]);
       L.marker([p.lat, p.lon], { keyboard: false, interactive: false, icon: L.divIcon({ className: "", iconSize: [12, 12], iconAnchor: [6, 6],
-        html: '<span class="fap-dot' + (hub ? " hub" : "") + '"></span><span class="fap ' + (hub ? "above" : "below") + '"><b>' + code + "</b>" + (hub ? '<small>' + esc(p.city) + "</small>" : sub) + "</span>" }) }).addTo(fmap);
+        html: '<span class="fap-dot' + (hub ? " hub" : "") + '"></span><span class="fap ' + (APCHIP[code] || (hub ? "above" : "below")) + '"><b>' + code + "</b>" + (hub ? '<small>' + esc(p.city) + "</small>" : sub) + "</span>" }) }).addTo(fmap);
     });
     fLayer = L.layerGroup().addTo(fmap);
     drawFlights(r);
-    fmap.fitBounds(pts, { padding: [34, 34] });
+    fmap.fitBounds(pts, { paddingTopLeft: [30, 54], paddingBottomRight: [30, 46] });
   }
   function drawFlights(r) {
     if (!fmap || !fLayer) return;
     fLayer.clearLayers();
-    var t = now().getTime(), slots = {};
-    flyList(FLYDIR[r]).forEach(function (f) {
+    var t = now().getTime(), slots = {}, list = flyList(FLYDIR[r]), uses = {};
+    list.forEach(function (f) { uses[f.from] = (uses[f.from] || 0) + 1; uses[f.to] = (uses[f.to] || 0) + 1; });
+    list.forEach(function (f) {
       var a = AP[f.from], b = AP[f.to], s = flyNow(f, t), c = flyColor(f), lp = s.live;
       var pos = gcPoint(a, b, s.frac), ahead = gcPoint(a, b, Math.min(1, s.frac + 0.01)), behind = gcPoint(a, b, Math.max(0, s.frac - 0.01));
       var brg = s.frac >= 0.99 ? bearing(behind, pos) : bearing(pos, ahead);
@@ -1155,10 +1157,12 @@ window.KXO_BOOT = function () {
         L.polyline(gcLine(P, b, 0, 1), { color: c, weight: 2.5, opacity: 0.8, dashArray: "4 7", interactive: false }).addTo(fLayer);
         L.polyline(tr.length > 1 ? gcLine(a, { lat: tr[0][0], lon: tr[0][1] }, 0, 1).concat(tr) : gcLine(a, P, 0, 1), { color: c, weight: 3.5, opacity: 0.95, interactive: false }).addTo(fLayer);
       } else if (s.frac > 0) L.polyline(gcLine(a, b, 0, s.frac), { color: c, weight: 3.5, opacity: 0.95, interactive: false }).addTo(fLayer);
-      var key = pos[0].toFixed(2) + "," + pos[1].toFixed(2), slot = slots[key] = (slots[key] || 0) + 1;
+      // A plane still parked at a one-flight airport needs no label: the airport chip already shows its ETD.
+      var quiet = !lp && (s.k === "sched" || s.k === "soon") && uses[f.from] === 1;
+      var key = pos[0].toFixed(2) + "," + pos[1].toFixed(2), slot = quiet ? 0 : (slots[key] = (slots[key] || 0) + 1);
       var when = lp ? (lp.gnd ? (s.k === "landed" ? "Landed" : "Taxiing") : "LIVE · " + liveLine(lp)) : s.k === "air" ? "ETA " + tz(f.eta) : (s.k === "sched" || s.k === "soon") ? "ETD " + tz(f.etd) : "Arrived";
       L.marker(pos, { keyboard: false, title: f.flight + ", " + f.who, zIndexOffset: s.k === "air" ? 1000 : 0, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
-        html: '<div class="fplane' + (s.k === "air" ? " air" : "") + (lp ? " live" : "") + '" style="--fc:' + c + '"><span class="fp-ico" style="transform:rotate(' + brg.toFixed(0) + 'deg)">' + ICON.plane + '</span><span class="flabel" style="top:' + ((slot - 1) * 34 - 10) + 'px"><b>' + esc(f.flight) + "</b> " + esc(f.who) + "<br>" + esc(when) + "</span></div>" }) }).addTo(fLayer);
+        html: '<div class="fplane' + (s.k === "air" ? " air" : "") + (lp ? " live" : "") + '" style="--fc:' + c + '"><span class="fp-ico" style="transform:rotate(' + brg.toFixed(0) + 'deg)">' + ICON.plane + '</span>' + (quiet ? "" : '<span class="flabel" style="top:' + ((slot - 1) * 34 - 10) + 'px"><b>' + esc(f.flight) + "</b> " + esc(f.who) + "<br>" + esc(when) + "</span>") + "</div>" }) }).addTo(fLayer);
     });
   }
   function stopFly() { if (flyTimer) { clearInterval(flyTimer); flyTimer = null; } if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } if (fmap) { fmap.remove(); fmap = null; fLayer = null; } }

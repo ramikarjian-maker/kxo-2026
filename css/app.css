@@ -505,3 +505,4 @@ body.locked > *:not(.gate) { display: none !important; }
 .menu .cook::before { content: "· "; color: var(--muted); }
 .menu .cook.open { color: var(--muted); font-weight: 600; font-style: italic; }
 .menu-go { margin-top: 10px; }
+.fap.right { left: 16px; top: 50%; transform: translateY(-50%); justify-items: start; }
