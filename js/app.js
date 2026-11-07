@@ -146,13 +146,17 @@ window.KXO_BOOT = function () {
     var label = a.kind === "driver" ? "Driver" : "Who's in";
     var empty = a.kind === "driver" ? "No driver yet" : a.kind === "dish" ? "Open" : "No one yet";
     var chips = names.length ? names.map(function (n) { return '<span class="pchip' + (n === ME ? " me" : "") + '">' + esc(n) + "</span>"; }).join("") : '<span class="none">' + empty + "</span>";
+    if (a.kind === "dish" && a.cap > 1) { // show every spot, so it's obvious two people can share a dish
+      chips = names.map(function (n) { return '<span class="pchip' + (n === ME ? " me" : "") + '">' + esc(n) + "</span>"; }).join("");
+      for (var k = names.length; k < a.cap; k++) chips += '<span class="pchip open">' + (k === 0 ? "Open" : "+1 spot") + "</span>";
+    }
     var count = a.cap && a.cap > 1 ? '<span class="cap">' + names.length + " of " + a.cap + "</span>" : (names.length && !a.cap ? '<span class="cap">' + names.length + "</span>" : "");
     var btn;
     if (Cloud.state.mode === "error") btn = '<span class="soon">Can\'t reach sign-ups right now. Try again in a bit.</span>';
     else if (!live()) btn = '<span class="soon">Sign-ups open soon</span>';
     else if (mine) btn = '<button class="joinbtn on" data-leave="' + actId + '">' + (a.kind === "driver" ? "You're driving · Undo" : a.kind === "dish" ? "You're making it · Undo" : "You're in · Undo") + "</button>";
     else if (full) btn = '<button class="joinbtn" disabled>Full</button>';
-    else btn = '<button class="joinbtn" data-join="' + actId + '">' + (a.kind === "driver" ? "I'll drive" : a.kind === "dish" ? "I'll make it" : "I'm in") + "</button>";
+    else btn = '<button class="joinbtn" data-join="' + actId + '">' + (a.kind === "driver" ? "I'll drive" : a.kind === "dish" ? (names.length ? "Join " + esc(names[0]) : "I'll make it") : "I'm in") + "</button>";
     return '<div class="who' + (compact ? " compact" : "") + '">' + (compact ? "" : '<div class="who-top"><span class="sec-label">' + label + "</span>" + count + "</div>") +
       '<div class="pchips">' + chips + "</div>" + btn + "</div>";
   }
@@ -415,7 +419,7 @@ window.KXO_BOOT = function () {
       ? '<div class="now" id="kclock">' + kitchenClockInner() + "</div>"
       : (t < ms("2026-11-26T00:00") ? '<div class="teaser">On Thanksgiving morning this becomes a live kitchen clock: what\'s happening now, who\'s on it, and a countdown to the next step.</div>' : "");
     var dishes = Object.keys(ACTS).filter(function (id) { return ACTS[id].kind === "dish"; }), taken = dishes.filter(function (id) { return Cloud.who(id).length; }).length;
-    var roles = '<div class="roles"><div class="menu-title">Who\'s making what · ' + taken + " of " + dishes.length + ' dishes claimed</div><div class="role-what">Sign up for a dish (up to 2 people each) and you own it start to finish: the make-ahead and the Thursday cooking. Your steps show up in the run sheet below and on your Highlights.</div>' +
+    var roles = '<div class="roles"><div class="menu-title">Who\'s making what · ' + taken + " of " + dishes.length + ' dishes claimed</div><div class="role-what"><b>Two people can sign up for each dish:</b> pair up, or split it (one preps ahead, one cooks Thursday). You own it start to finish, and your steps show up in the run sheet below and on your Highlights.</div>' +
       dishes.map(function (id) {
         var a = ACTS[id];
         return '<div class="role"><div class="role-who">' + esc(a.title) + '</div><div class="role-what">' + esc(a.what) + "</div>" + whoHtml(id, true) + "</div>";

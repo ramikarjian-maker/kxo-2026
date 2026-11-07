@@ -515,3 +515,4 @@ body.locked > *:not(.gate) { display: none !important; }
 .pk-next li { padding: 4px 0; }
 .pk-next .pk-ref { padding-top: 2px; }
 .court.big .pk-ref { font-size: clamp(14px, 1.4vw, 22px); }
+.pchip.open { background: transparent; border: 1px dashed var(--line); color: var(--muted); font-weight: 600; }
