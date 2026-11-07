@@ -612,6 +612,11 @@ window.KXO_BOOT = function () {
   if (OVERRIDE) pv.push("clock set to " + dowFmt.format(OVERRIDE) + " " + clock(OVERRIDE));
   if (Q.get("mock") === "1") pv.push("sign-ups saved on this phone only");
   if (pv.length) { var b = document.getElementById("preview"); b.textContent = "Preview: " + pv.join(" · "); b.hidden = false; }
+  if (Q.get("debug") === "1") {
+    var dbg = document.getElementById("preview");
+    var show = function () { dbg.hidden = false; dbg.textContent = "Sign-ups: " + Cloud.state.mode + (Cloud.state.backend ? " (" + Cloud.state.backend + ")" : "") + (Cloud.state.error ? " · " + Cloud.state.error : ""); };
+    Cloud.on(show); show();
+  }
   updateMeChip();
   Cloud.start();
   render();

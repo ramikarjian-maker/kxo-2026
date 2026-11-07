@@ -35,19 +35,36 @@ window.KXOCloud = (function () {
   function millis(v) { return v && typeof v.toMillis === "function" ? v.toMillis() : Date.now(); }
 
   function startFirebase(cfg) {
-    var V = "10.12.2";
-    return loadScript("https://www.gstatic.com/firebasejs/" + V + "/firebase-app-compat.js")
-      .then(function () { return loadScript("https://www.gstatic.com/firebasejs/" + V + "/firebase-firestore-compat.js"); })
-      .then(function () {
-        firebase.initializeApp(cfg);
-        var db = firebase.firestore();
-        var stamp = firebase.firestore.FieldValue.serverTimestamp;
-        var opts = { serverTimestamps: "estimate" };
-        db.collection("signups").onSnapshot(function (snap) {
+    var V = "https://www.gstatic.com/firebasejs/10.12.2/";
+    return loadScript(V + "firebase-app-compat.js").then(function () {
+      firebase.initializeApp(cfg);
+      return tryFirestore(V).catch(function (err) {
+        console.warn("Firestore not available, trying Realtime Database:", err && (err.code || err.message));
+        if (!cfg.databaseURL) throw err;
+        return tryRtdb(V);
+      });
+    });
+  }
+
+  function tryFirestore(V) {
+    return loadScript(V + "firebase-firestore-compat.js").then(function () {
+      var db = firebase.firestore(), stamp = firebase.firestore.FieldValue.serverTimestamp, opts = { serverTimestamps: "estimate" };
+      return new Promise(function (resolve, reject) {
+        var done = false, unsub = null;
+        var timer = setTimeout(function () { if (!done) { done = true; if (unsub) unsub(); reject(new Error("Firestore timeout")); } }, 8000);
+        unsub = db.collection("signups").onSnapshot(function (snap) {
           var rows = [];
           snap.forEach(function (d) { var x = d.data(opts); rows.push({ activity: x.activity, person: x.person, ts: millis(x.ts) }); });
+          if (!done) {
+            if (snap.metadata.fromCache) return;
+            done = true; clearTimeout(timer); resolve();
+          }
           setSignups(rows);
-        }, function (err) { console.error(err); state.mode = "error"; emit("mode"); });
+        }, function (err) {
+          if (!done) { done = true; clearTimeout(timer); reject(err); }
+          else { console.error(err); state.mode = "error"; state.error = err.code || String(err); emit("mode"); }
+        });
+      }).then(function () {
         db.collection("wall").orderBy("ts", "desc").limit(300).onSnapshot(function (snap) {
           var rows = [];
           snap.forEach(function (d) { var x = d.data(opts); rows.push({ id: d.id, name: x.name, text: x.text, ts: millis(x.ts) }); });
@@ -57,9 +74,39 @@ window.KXOCloud = (function () {
         api.leave = function (act, person) { return db.collection("signups").doc(act + "__" + person).delete(); };
         api.post = function (name, text) { return db.collection("wall").add({ name: name, text: text, ts: stamp() }); };
         api.remove = function (id) { return db.collection("wall").doc(id).delete(); };
-        state.mode = "firebase";
-        emit("mode");
+        state.mode = "firebase"; state.backend = "Firestore"; emit("mode");
       });
+    });
+  }
+
+  function tryRtdb(V) {
+    return loadScript(V + "firebase-database-compat.js").then(function () {
+      var db = firebase.database(), TS = firebase.database.ServerValue.TIMESTAMP;
+      return new Promise(function (resolve, reject) {
+        var done = false;
+        var timer = setTimeout(function () { if (!done) { done = true; reject(new Error("Realtime Database timeout")); } }, 8000);
+        db.ref("signups").on("value", function (snap) {
+          var rows = [];
+          snap.forEach(function (c) { var x = c.val() || {}; rows.push({ activity: x.activity, person: x.person, ts: x.ts || Date.now() }); return false; });
+          setSignups(rows);
+          if (!done) { done = true; clearTimeout(timer); resolve(); }
+        }, function (err) {
+          if (!done) { done = true; clearTimeout(timer); reject(err); }
+          else { console.error(err); state.mode = "error"; state.error = err.code || String(err); emit("mode"); }
+        });
+      }).then(function () {
+        db.ref("wall").on("value", function (snap) {
+          var rows = [];
+          snap.forEach(function (c) { var x = c.val() || {}; rows.push({ id: c.key, name: x.name, text: x.text, ts: x.ts || Date.now() }); return false; });
+          setWall(rows);
+        }, function (err) { console.error(err); });
+        api.join = function (act, person) { return db.ref("signups/" + act + "__" + person).set({ activity: act, person: person, ts: TS }); };
+        api.leave = function (act, person) { return db.ref("signups/" + act + "__" + person).remove(); };
+        api.post = function (name, text) { return db.ref("wall").push({ name: name, text: text, ts: TS }); };
+        api.remove = function (id) { return db.ref("wall/" + id).remove(); };
+        state.mode = "firebase"; state.backend = "Realtime Database"; emit("mode");
+      });
+    });
   }
 
   function startMock() {
@@ -82,7 +129,7 @@ window.KXOCloud = (function () {
     var cfg = window.KXO_FIREBASE;
     if (q.get("mock") === "1") { startMock(); return; }
     if (cfg && cfg.projectId) {
-      startFirebase(cfg).catch(function (err) { console.error(err); state.mode = "error"; emit("mode"); });
+      startFirebase(cfg).catch(function (err) { console.error(err); state.mode = "error"; state.error = (err && (err.code || err.message)) || "unknown"; emit("mode"); });
     }
   };
   return api;
