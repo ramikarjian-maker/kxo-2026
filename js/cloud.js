@@ -3,7 +3,7 @@
    "off" (no config yet), "error" (couldn't connect). */
 window.KXOCloud = (function () {
   var listeners = [];
-  var state = { mode: "off", signups: {}, wall: [] };
+  var state = { mode: "off", signups: {}, wall: [], games: {} };
   function emit(kind) { listeners.forEach(function (f) { try { f(kind); } catch (e) { console.error(e); } }); }
 
   function setSignups(rows) {
@@ -20,8 +20,21 @@ window.KXOCloud = (function () {
     state: state,
     on: function (f) { listeners.push(f); },
     who: function (act) { return (state.signups[act] || []).map(function (r) { return r.person; }); },
-    join: noop, leave: noop, post: noop, remove: noop
+    join: noop, leave: noop, post: noop, remove: noop,
+    game: function (id) { return state.games[id] || null; },
+    gameUpdate: noop, gameSet: noop
   };
+  function setGames(g) { state.games = g || {}; emit("games"); }
+  // "a/b/c" paths -> nested object (for Firestore merge writes)
+  function nest(updates) {
+    var out = {};
+    Object.keys(updates).forEach(function (path) {
+      var parts = path.split("/"), o = out;
+      for (var i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
+      o[parts[parts.length - 1]] = updates[path];
+    });
+    return out;
+  }
 
   function loadScript(src) {
     return new Promise(function (res, rej) {
@@ -74,6 +87,11 @@ window.KXOCloud = (function () {
         api.leave = function (act, person) { return db.collection("signups").doc(act + "__" + person).delete(); };
         api.post = function (name, text) { return db.collection("wall").add({ name: name, text: text, ts: stamp() }); };
         api.remove = function (id) { return db.collection("wall").doc(id).delete(); };
+        db.collection("games").onSnapshot(function (snap) {
+          var g = {}; snap.forEach(function (d) { g[d.id] = d.data(); }); setGames(g);
+        }, function (err) { console.error(err); });
+        api.gameUpdate = function (id, updates) { return db.collection("games").doc(id).set(nest(updates), { merge: true }); };
+        api.gameSet = function (id, val) { return val == null ? db.collection("games").doc(id).delete() : db.collection("games").doc(id).set(val); };
         state.mode = "firebase"; state.backend = "Firestore"; emit("mode");
       });
     });
@@ -104,6 +122,9 @@ window.KXOCloud = (function () {
         api.leave = function (act, person) { return db.ref("signups/" + act + "__" + person).remove(); };
         api.post = function (name, text) { return db.ref("wall").push({ name: name, text: text, ts: TS }); };
         api.remove = function (id) { return db.ref("wall/" + id).remove(); };
+        db.ref("games").on("value", function (snap) { setGames(snap.val() || {}); }, function (err) { console.error(err); });
+        api.gameUpdate = function (id, updates) { var u = {}; Object.keys(updates).forEach(function (k) { u[id + "/" + k] = updates[k]; }); return db.ref("games").update(u); };
+        api.gameSet = function (id, val) { return db.ref("games/" + id).set(val == null ? null : val); };
         state.mode = "firebase"; state.backend = "Realtime Database"; emit("mode");
       });
     });
@@ -111,9 +132,19 @@ window.KXOCloud = (function () {
 
   function startMock() {
     var KEY = "kxo.mock";
-    function read() { try { return JSON.parse(localStorage.getItem(KEY)) || { signups: [], wall: [] }; } catch (e) { return { signups: [], wall: [] }; } }
+    function read() { var d; try { d = JSON.parse(localStorage.getItem(KEY)); } catch (e) {} d = d || {}; d.signups = d.signups || []; d.wall = d.wall || []; d.games = d.games || {}; return d; }
     function write(d) { try { localStorage.setItem(KEY, JSON.stringify(d)); } catch (e) {} pull(); }
-    function pull() { var d = read(); setSignups(d.signups.slice()); setWall(d.wall.slice()); }
+    function pull() { var d = read(); setSignups(d.signups.slice()); setWall(d.wall.slice()); setGames(d.games); }
+    api.gameUpdate = function (id, updates) {
+      var d = read(); d.games[id] = d.games[id] || {};
+      Object.keys(updates).forEach(function (path) {
+        var parts = path.split("/"), o = d.games[id];
+        for (var i = 0; i < parts.length - 1; i++) { o[parts[i]] = o[parts[i]] || {}; o = o[parts[i]]; }
+        if (updates[path] == null) delete o[parts[parts.length - 1]]; else o[parts[parts.length - 1]] = updates[path];
+      });
+      write(d); return Promise.resolve();
+    };
+    api.gameSet = function (id, val) { var d = read(); if (val == null) delete d.games[id]; else d.games[id] = val; write(d); return Promise.resolve(); };
     api.join = function (act, person) { var d = read(); d.signups = d.signups.filter(function (r) { return !(r.activity === act && r.person === person); }); d.signups.push({ activity: act, person: person, ts: Date.now() }); write(d); return Promise.resolve(); };
     api.leave = function (act, person) { var d = read(); d.signups = d.signups.filter(function (r) { return !(r.activity === act && r.person === person); }); write(d); return Promise.resolve(); };
     api.post = function (name, text) { var d = read(); d.wall.push({ id: "m" + Date.now(), name: name, text: text, ts: Date.now() }); write(d); return Promise.resolve(); };
