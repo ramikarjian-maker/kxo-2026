@@ -47,7 +47,7 @@ window.KXO_BOOT = function () {
   };
   function appleUrl(p) { return "https://maps.apple.com/?daddr=" + encodeURIComponent(p.q) + "&dirflg=d"; }
   function googleUrl(p) { return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(p.q) + "&travelmode=driving"; }
-  function trackUrl(f) { return f.flight ? "https://www.flightaware.com/live/flight/" + encodeURIComponent(f.flight.replace(/\s+/g, "").toUpperCase()) : "https://www.flightaware.com/live/airport/KSEA"; }
+  function trackUrl(f) { var id = f.cs || (f.flight || "").replace(/\s+/g, "").toUpperCase(); return id ? "https://www.flightaware.com/live/flight/" + encodeURIComponent(id) : "https://www.flightaware.com/live/airport/KSEA"; }
   var toastTimer = null;
   function toast(msg) {
     var t = document.getElementById("toast");
@@ -206,12 +206,12 @@ window.KXO_BOOT = function () {
   function boardHtml(dir) {
     var rows = K.FLIGHTS.filter(function (f) { return f.dir === dir; });
     var missing = rows.some(function (f) { return !f.flight; });
-    return '<div class="board" data-board="' + dir + '" role="table" aria-label="' + (dir === "arr" ? "SEA arrivals" : "SEA departures") + '"><div class="board-title">' + ICON.plane + (dir === "arr" ? "SEA Arrivals" : "SEA Departures") + "</div>" +
+    return '<div class="board" data-board="' + dir + '" role="table" aria-label="' + (dir === "arr" ? "SEA arrivals" : "SEA departures") + '"><div class="board-title">' + ICON.plane + (dir === "arr" ? "SEA Arrivals" : "SEA Departures") + '<button class="board-live" data-go="' + (dir === "arr" ? "fly-in" : "fly-out") + '">Live map →</button></div>' +
       '<div class="board-cols"><span>WHO</span><span>' + (dir === "arr" ? "LANDS" : "DEPARTS") + "</span></div>" +
       rows.map(function (f) {
         var drv = Cloud.who(f.drive)[0];
         return '<div class="board-row" role="row"><div class="flaprow" aria-label="' + esc(f.who + ", " + f.time) + '">' + flaps(f.who.replace(/ /g, ""), 10) + flaps(f.time, 7, true) + "</div>" +
-          '<div class="board-sub"><span>' + (f.flight ? "Flight " + esc(f.flight.toUpperCase()) : "Flight # coming") + " · Driver: " + (drv ? esc(drv) : "TBD") + "</span>" +
+          '<div class="board-sub"><span>' + (f.flight ? esc(f.flight.toUpperCase()) + (f.from ? " · " + f.from + "→" + f.to : "") : "Flight # coming") + " · Driver: " + (drv ? esc(drv) : "TBD") + "</span>" +
           '<a class="track" href="' + trackUrl(f) + '" target="_blank" rel="noopener">' + (f.flight ? "Track flight" : "Live SEA board") + "</a></div></div>";
       }).join("") +
       (missing ? '<div class="board-note">Flight numbers are on the way. Until then, the button opens the live SEA board.</div>' : "") + "</div>";
@@ -251,7 +251,7 @@ window.KXO_BOOT = function () {
   }
 
   /* ---------- now & next ---------- */
-  var ARRIVE = ms("2026-11-25T17:00"), TRIP_START = ms("2026-11-25T16:00"), TRIP_END = ms("2026-11-29T18:00");
+  var ARRIVE = ms("2026-11-25T16:58"), TRIP_START = ms("2026-11-25T16:00"), TRIP_END = ms("2026-11-29T18:00");
   var THU_STEPS = PREP.sections[PREP.sections.length - 1].items;
   function kitchenStep(t) {
     if (today() !== "2026-11-26") return null;
@@ -262,7 +262,7 @@ window.KXO_BOOT = function () {
   function nowInner() {
     var t = now().getTime();
     if (t < TRIP_START) {
-      return '<div class="kicker">Countdown</div><div class="cd" data-until="' + ARRIVE + '">' + cdHtml(ARRIVE - t) + '</div><div class="now-sub">until the Ohs land at SEA · Wed, Nov 25, ~5:00p</div>';
+      return '<div class="kicker">Countdown</div><div class="cd" data-until="' + ARRIVE + '">' + cdHtml(ARRIVE - t) + '</div><div class="now-sub">until the Ohs land at SEA · Wed, Nov 25, 4:58p PT</div>';
     }
     if (t > TRIP_END) return '<div class="kicker">That\'s a wrap</div><div class="now-title">Thanks for coming, everyone.</div><div><button class="maplink" data-go="thanks">Read the gratitude wall</button></div>';
     var evs = EVENTS.filter(function (e) { return relevant(e.it, ME); });
@@ -336,7 +336,7 @@ window.KXO_BOOT = function () {
       ["Sign the pickleball waiver", "Everyone playing · Fri 11:00a", K.LINKS.pickleWaiver],
       ["Sign the escape room waiver", "The 6 players · Fri 8:00p", K.LINKS.escapeWaiver]
     ];
-    var pkBanner = pkBannerHtml() + kBannerHtml();
+    var pkBanner = flyBannerHtml() + pkBannerHtml() + kBannerHtml();
     return '<div class="view-anim"><div class="now" id="nowcard">' + nowInner() + "</div>" + pkBanner + photoStripHtml() + myWeekHtml() +
       '<div class="hl-intro"><div class="kicker">The big picture</div><h2 class="headline">Five days, 14 of us, two turkeys.</h2></div>' +
       '<div class="hl-list">' + DAYS.map(function (d) {
@@ -366,6 +366,7 @@ window.KXO_BOOT = function () {
   function mapView() {
     return '<div class="view-anim"><div class="map-head"><div class="kicker">Where we\'re going</div><h2 class="headline">Everything, from home</h2></div>' +
       '<div id="lmap" class="lmap" aria-label="Map"></div><div class="map-tools" id="map-tools"><button class="maplink" data-mapfit="near">Around home</button><button class="maplink" data-mapfit="all">Include the cabin</button></div>' +
+      '<div class="fly-links"><div class="kicker">Live flight maps</div><div class="map-tools"><button class="maplink primary" data-go="fly-in">Wed arrivals</button><button class="maplink primary" data-go="fly-out">Sat departures</button></div></div>' +
       '<ol class="places">' + Object.keys(PL).map(function (key) {
         var p = PL[key];
         return '<li class="place"><span class="n">' + p.n + '</span><div><h3>' + esc(p.name) + '</h3><div class="when">' + esc(p.when) + '</div><div class="addr">' + esc(p.addr) + '</div><div class="drive">' + esc(p.drive) + " from home</div>" +
@@ -952,9 +953,143 @@ window.KXO_BOOT = function () {
     return '<button class="pk-banner kb" data-go="karaoke"><span class="kicker">Karaoke set list</span><b>Up now: ' + esc(q[0].who) + "</b><span>" + esc(q[0].title) + " · " + q.length + " to go →</span></button>";
   }
 
+  /* ---------- live flight maps (Wed arrivals + Sat departures) ---------- */
+  // Route map: great-circle paths, ETD/ETA chips, and planes placed by the schedule clock.
+  // Live radar: real ADS-B positions from adsb.lol (embeds fine; its API blocks browser calls).
+  var AP = {
+    SEA: { city: "Seattle", lat: 47.4502, lon: -122.3088 },
+    LAX: { city: "Los Angeles", lat: 33.9416, lon: -118.4085 },
+    STL: { city: "St. Louis", lat: 38.7487, lon: -90.3700 },
+    OAK: { city: "Oakland", lat: 37.7126, lon: -122.2197 }
+  };
+  var FLYCOL = ["#f6c453", "#e45b6b", "#7cc8f2"];
+  var FLYDIR = { "fly-in": "arr", "fly-out": "dep" };
+  var flyTab = Q.get("radar") ? "radar" : "route", fmap = null, fLayer = null, flyTimer = null;
+  function flyList(dir) { return K.FLIGHTS.filter(function (f) { return f.dir === dir && f.cs && AP[f.from] && AP[f.to]; }); }
+  function flyColor(f) { var l = flyList(f.dir); return FLYCOL[l.indexOf(f) % FLYCOL.length]; }
+  function tz(s) { return /\b[A-Z]T$/.test(s) ? s : s + " PT"; }
+  var RAD = Math.PI / 180;
+  function gcPoint(a, b, f) {
+    var p1 = a.lat * RAD, l1 = a.lon * RAD, p2 = b.lat * RAD, l2 = b.lon * RAD;
+    var d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((p2 - p1) / 2), 2) + Math.cos(p1) * Math.cos(p2) * Math.pow(Math.sin((l2 - l1) / 2), 2)));
+    if (!d) return [a.lat, a.lon];
+    var A = Math.sin((1 - f) * d) / Math.sin(d), B = Math.sin(f * d) / Math.sin(d);
+    var x = A * Math.cos(p1) * Math.cos(l1) + B * Math.cos(p2) * Math.cos(l2);
+    var y = A * Math.cos(p1) * Math.sin(l1) + B * Math.cos(p2) * Math.sin(l2);
+    var z = A * Math.sin(p1) + B * Math.sin(p2);
+    return [Math.atan2(z, Math.sqrt(x * x + y * y)) / RAD, Math.atan2(y, x) / RAD];
+  }
+  function gcLine(a, b, f0, f1) { var pts = [], n = 48; for (var i = 0; i <= n; i++) pts.push(gcPoint(a, b, f0 + (f1 - f0) * i / n)); return pts; }
+  function bearing(p, q) {
+    var p1 = p[0] * RAD, p2 = q[0] * RAD, dl = (q[1] - p[1]) * RAD;
+    return (Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl)) / RAD + 360) % 360;
+  }
+  function flyState(f, t) {
+    var d = ms(f.dep), a = ms(f.arr), TAXI = 12 * 60000, s = { d: d, a: a, frac: 0 };
+    if (t < d - 3 * 3600000) { s.k = "sched"; s.label = "Scheduled"; s.c = "wait"; }
+    else if (t < d) { s.k = "soon"; s.label = "Departs soon"; s.c = "wait"; }
+    else if (t < a) { s.k = "air"; s.label = "En route"; s.c = "ok"; s.frac = Math.max(0, Math.min(1, (t - d - TAXI) / (a - d - 2 * TAXI))); }
+    else if (t < a + 45 * 60000) { s.k = "landed"; s.label = "Landing now"; s.c = "ok"; s.frac = 1; }
+    else { s.k = "done"; s.label = "Arrived"; s.c = "ok"; s.frac = 1; }
+    return s;
+  }
+  function flyAirborne(list, t) { return list.some(function (f) { var s = flyState(f, t); return s.k === "air" || s.k === "soon"; }); }
+  function fcardsHtml(dir) {
+    var t = now().getTime();
+    return flyList(dir).map(function (f) {
+      var s = flyState(f, t), c = flyColor(f), drv = Cloud.who(f.drive)[0], pct = (s.frac * 100).toFixed(1);
+      var line = s.k === "sched" ? "Departs " + tz(f.etd) + " · lands " + tz(f.eta)
+        : s.k === "soon" ? 'Wheels up <b data-until="' + s.d + '" data-fmt="in">' + inText(s.d - t) + "</b>"
+        : s.k === "air" ? 'Lands <b data-until="' + s.a + '" data-fmt="in">' + inText(s.a - t) + "</b> (on schedule)"
+        : f.dir === "arr" ? "Scheduled in at " + tz(f.eta) + ". Check FlightAware for the gate." : "Scheduled in at " + tz(f.eta) + ".";
+      return '<div class="fcard" style="--fc:' + c + '"><div class="fc-top"><b>' + esc(f.who) + '</b><span class="fc-no">' + esc(f.flight) + '</span><span class="tag status ' + s.c + '">' + esc(s.label) + "</span></div>" +
+        '<div class="fc-route"><div class="fc-end"><span class="ap">' + f.from + '</span><span class="tm">' + esc(tz(f.etd)) + '</span><span class="lb">ETD</span></div>' +
+        '<div class="fc-bar" aria-hidden="true"><i style="width:' + pct + '%"></i><span class="pl" style="left:' + pct + '%">' + ICON.plane + "</span></div>" +
+        '<div class="fc-end"><span class="ap">' + f.to + '</span><span class="tm">' + esc(tz(f.eta)) + '</span><span class="lb">ETA</span></div></div>' +
+        '<div class="fc-sub"><span>' + line + "</span><span>" + (f.dir === "arr" ? "Pickup" : "Drop-off") + ": " + (drv ? esc(drv) : "TBD") + "</span></div>" +
+        '<div class="fc-links"><a class="track" href="' + trackUrl(f) + '" target="_blank" rel="noopener">FlightAware: delays + gate</a></div></div>';
+    }).join("");
+  }
+  function radarUrl(list, w) {
+    var la = [], lo = [];
+    list.forEach(function (f) { [AP[f.from], AP[f.to]].forEach(function (p) { la.push(p.lat); lo.push(p.lon); }); });
+    var cLat = (Math.min.apply(0, la) + Math.max.apply(0, la)) / 2, cLon = (Math.min.apply(0, lo) + Math.max.apply(0, lo)) / 2;
+    var span = Math.max(Math.max.apply(0, lo) - Math.min.apply(0, lo), (Math.max.apply(0, la) - Math.min.apply(0, la)) * 1.4, 4);
+    var z = Math.max(3, Math.min(8, Math.round(Math.log(w * 360 / (256 * span * 1.2)) / Math.LN2 * 10) / 10));
+    var re = Q.get("radar") || "^(" + list.map(function (f) { return f.cs; }).join("|") + ")$";
+    return "https://adsb.lol/?filterCallSign=" + encodeURIComponent(re) + "&hideSideBar&hideButtons&enableLabels&extendedLabels=1&tempTrails=3600&lat=" + cLat.toFixed(2) + "&lon=" + cLon.toFixed(2) + "&zoom=" + z;
+  }
+  function flyView(r) {
+    var dir = FLYDIR[r], list = flyList(dir), t = now().getTime(), live = flyAirborne(list, t);
+    var w = Math.min(viewEl.clientWidth || window.innerWidth, 900);
+    var body = flyTab === "radar"
+      ? '<div class="radar"><iframe src="' + esc(radarUrl(list, w)) + '" title="Live radar of our flights" loading="lazy" referrerpolicy="no-referrer"></iframe></div>' +
+        '<div class="fly-note">The real planes, live, from adsb.lol\'s volunteer receivers, showing only our ' + list.length + ' flights. A plane appears once its transponder is on (at the gate or taxiing), so before then the map is empty. <a href="' + esc(radarUrl(list, 1100)) + '" target="_blank" rel="noopener">Open full screen</a></div>'
+      : '<div id="fmap" class="lmap fmap" aria-label="Flight route map"></div>' +
+        '<div class="fly-note">Planes move on the schedule clock, which shows who\'s where. For delays and gates, use FlightAware. For the real plane, switch to Live radar.</div>';
+    return '<div class="view-anim fly"><div class="day-head"><div class="kicker">Live flight map · ' + (dir === "arr" ? "Wed, Nov 25" : "Sat, Nov 28") + '</div><h2 class="headline">' + (dir === "arr" ? "Three flights in to SEA" : "Three flights home from SEA") + "</h2></div>" +
+      '<div class="seg" role="tablist" aria-label="Which day"><button role="tab" data-go="fly-in" aria-selected="' + (r === "fly-in") + '">Wed arrivals</button><button role="tab" data-go="fly-out" aria-selected="' + (r === "fly-out") + '">Sat departures</button></div>' +
+      '<div class="seg sub" role="tablist" aria-label="Map type"><button role="tab" data-flytab="route" aria-selected="' + (flyTab === "route") + '">Route map</button><button role="tab" data-flytab="radar" aria-selected="' + (flyTab === "radar") + '">Live radar<span class="livedot' + (live ? " on" : "") + '"></span></button></div>' +
+      body + '<div class="fcards" id="fcards">' + fcardsHtml(dir) + "</div></div>";
+  }
+  function initFly(r) {
+    if (fmap) { fmap.remove(); fmap = null; }
+    var el = document.getElementById("fmap"); if (!el) return;
+    if (!window.L) { el.outerHTML = '<div class="map-note">The map couldn\'t load here. The flight cards below still update.</div>'; return; }
+    var list = flyList(FLYDIR[r]);
+    fmap = L.map(el, { scrollWheelZoom: false, zoomControl: true, zoomSnap: 0.25 });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 12, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(fmap);
+    var codes = {}, pts = [];
+    list.forEach(function (f) { [["from", f.from], ["to", f.to]].forEach(function (x) { (codes[x[1]] = codes[x[1]] || []).push({ f: f, end: x[0] }); }); });
+    Object.keys(codes).forEach(function (code) {
+      var p = AP[code], rows = codes[code], hub = rows.length > 1;
+      var sub = hub ? "" : rows.map(function (x) { return '<small style="color:' + flyColor(x.f) + '">' + (x.end === "from" ? "ETD " + esc(tz(x.f.etd)) : "ETA " + esc(tz(x.f.eta))) + "</small>"; }).join("");
+      pts.push([p.lat, p.lon]);
+      L.marker([p.lat, p.lon], { keyboard: false, interactive: false, icon: L.divIcon({ className: "", iconSize: [12, 12], iconAnchor: [6, 6],
+        html: '<span class="fap-dot' + (hub ? " hub" : "") + '"></span><span class="fap ' + (hub ? "above" : "below") + '"><b>' + code + "</b>" + (hub ? '<small>' + esc(p.city) + "</small>" : sub) + "</span>" }) }).addTo(fmap);
+    });
+    fLayer = L.layerGroup().addTo(fmap);
+    drawFlights(r);
+    fmap.fitBounds(pts, { padding: [34, 34] });
+  }
+  function drawFlights(r) {
+    if (!fmap || !fLayer) return;
+    fLayer.clearLayers();
+    var t = now().getTime(), slots = {};
+    flyList(FLYDIR[r]).forEach(function (f) {
+      var a = AP[f.from], b = AP[f.to], s = flyState(f, t), c = flyColor(f);
+      var pos = gcPoint(a, b, s.frac), ahead = gcPoint(a, b, Math.min(1, s.frac + 0.01)), behind = gcPoint(a, b, Math.max(0, s.frac - 0.01));
+      var brg = s.frac >= 0.99 ? bearing(behind, pos) : bearing(pos, ahead);
+      L.polyline(gcLine(a, b, 0, 1), { color: c, weight: 2, opacity: 0.55, dashArray: "4 7", interactive: false }).addTo(fLayer);
+      if (s.frac > 0) L.polyline(gcLine(a, b, 0, s.frac), { color: c, weight: 3.5, opacity: 0.95, interactive: false }).addTo(fLayer);
+      var key = pos[0].toFixed(2) + "," + pos[1].toFixed(2), slot = slots[key] = (slots[key] || 0) + 1;
+      var when = s.k === "air" ? "ETA " + tz(f.eta) : (s.k === "sched" || s.k === "soon") ? "ETD " + tz(f.etd) : "Arrived";
+      L.marker(pos, { keyboard: false, title: f.flight + ", " + f.who, zIndexOffset: s.k === "air" ? 1000 : 0, icon: L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
+        html: '<div class="fplane' + (s.k === "air" ? " air" : "") + '" style="--fc:' + c + '"><span class="fp-ico" style="transform:rotate(' + brg.toFixed(0) + 'deg)">' + ICON.plane + '</span><span class="flabel" style="top:' + ((slot - 1) * 34 - 10) + 'px"><b>' + esc(f.flight) + "</b> " + esc(f.who) + "<br>" + esc(when) + "</span></div>" }) }).addTo(fLayer);
+    });
+  }
+  function stopFly() { if (flyTimer) { clearInterval(flyTimer); flyTimer = null; } if (fmap) { fmap.remove(); fmap = null; fLayer = null; } }
+  function startFly(r) {
+    if (flyTab === "route") initFly(r);
+    flyTimer = setInterval(function () {
+      var rr = route(); if (!FLYDIR[rr]) return;
+      if (flyTab === "route") drawFlights(rr);
+      var c = document.getElementById("fcards"); if (c) c.innerHTML = fcardsHtml(FLYDIR[rr]);
+      var dot = document.querySelector(".livedot"); if (dot) dot.classList.toggle("on", flyAirborne(flyList(FLYDIR[rr]), now().getTime()));
+    }, 15000);
+  }
+  function flyBannerHtml() {
+    var t = now().getTime(), act = K.FLIGHTS.filter(function (f) { return f.cs && t >= ms(f.dep) - 3 * 3600000 && t < ms(f.arr) + 45 * 60000; });
+    if (!act.length) return "";
+    var air = act.filter(function (f) { return flyState(f, t).k === "air"; }).length;
+    return '<button class="pk-banner fb" data-go="' + (act[0].dir === "arr" ? "fly-in" : "fly-out") + '"><span class="kicker">Live flight map</span><b>' +
+      (air ? air + (air > 1 ? " flights" : " flight") + " in the air" : "Flight day") + "</b><span>" +
+      act.map(function (f) { return esc(f.flight) + (f.dir === "arr" ? " lands " + esc(f.eta) : " departs " + esc(f.etd)); }).join(" · ") + " →</span></button>";
+  }
+
   /* ---------- routing ---------- */
   var viewEl = document.getElementById("view"), stripEl = document.getElementById("daystrip"), daysEl = document.getElementById("days");
-  var VIEWS = ["week", "map", "thanks", "tv", "prep", "pickle", "pickle-tv", "photos", "photos-tv", "karaoke", "karaoke-tv"];
+  var VIEWS = ["week", "map", "fly-in", "fly-out", "thanks", "tv", "prep", "pickle", "pickle-tv", "photos", "photos-tv", "karaoke", "karaoke-tv"];
   function todayDay() { return DAYS.filter(function (d) { return d.date === today(); })[0]; }
   var lastDay = todayDay() ? todayDay().id : "wed";
   daysEl.innerHTML = DAYS.map(function (d) {
@@ -968,9 +1103,11 @@ window.KXO_BOOT = function () {
   function render(keepScroll) {
     var y = window.scrollY, r = route(), d = DAYS.filter(function (x) { return x.id === r; })[0], section;
     if (lmap) { lmap.remove(); lmap = null; }
+    stopFly();
     document.body.classList.toggle("tvmode", r === "tv" || r === "pickle-tv" || r === "photos-tv" || r === "karaoke-tv");
     if (d) { lastDay = d.id; section = "days"; viewEl.innerHTML = dayView(d); }
     else if (r === "map") { section = "map"; viewEl.innerHTML = mapView(); }
+    else if (FLYDIR[r]) { section = "map"; viewEl.innerHTML = flyView(r); }
     else if (r === "prep") { section = "prep"; viewEl.innerHTML = prepView(); }
     else if (r === "thanks") { section = "thanks"; viewEl.innerHTML = thanksView(); }
     else if (r === "tv") { section = "thanks"; viewEl.innerHTML = tvView(); }
@@ -985,6 +1122,7 @@ window.KXO_BOOT = function () {
     Array.prototype.forEach.call(daysEl.children, function (b) { b.setAttribute("aria-selected", d && b.getAttribute("data-go") === d.id ? "true" : "false"); });
     Array.prototype.forEach.call(document.querySelectorAll(".navbtn"), function (b) { if (b.getAttribute("data-nav") === section) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
     if (r === "map") initMap();
+    if (FLYDIR[r]) startFly(r);
     if (d && d.board) animateBoards();
     if (r === "tv") startTv(); else stopTv();
     if (r === "photos-tv") startPtv(); else stopPtv();
@@ -999,6 +1137,7 @@ window.KXO_BOOT = function () {
     softTimer = setTimeout(function () {
       var r = route();
       if (r === "map" || r === "tv" || r === "pickle-tv" || r === "photos-tv") return;
+      if (FLYDIR[r]) { var fc = document.getElementById("fcards"); if (fc) fc.innerHTML = fcardsHtml(FLYDIR[r]); return; }
       if (r === "thanks") { var l = document.getElementById("wall-list"); if (l) l.innerHTML = wallListHtml(); return; }
       render(true);
     }, 120);
@@ -1048,8 +1187,9 @@ window.KXO_BOOT = function () {
     if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("pin")) { e.preventDefault(); openSheet(e.target.getAttribute("data-place")); }
   });
   document.addEventListener("click", function (e) {
-    var t = e.target.closest("[data-pkp],[data-pkmove],[data-kchip],[data-ksing],[data-kmore],[data-kdone],[data-kskip],[data-kdel],[data-addphoto],[data-photo],[data-lbclose],[data-lbdel],[data-pk],[data-place],[data-go],[data-nav],[data-copy],[data-join],[data-leave],[data-pickme],[data-iam],[data-closewho],[data-unpost],[data-mapfit]");
+    var t = e.target.closest("[data-flytab],[data-pkp],[data-pkmove],[data-kchip],[data-ksing],[data-kmore],[data-kdone],[data-kskip],[data-kdel],[data-addphoto],[data-photo],[data-lbclose],[data-lbdel],[data-pk],[data-place],[data-go],[data-nav],[data-copy],[data-join],[data-leave],[data-pickme],[data-iam],[data-closewho],[data-unpost],[data-mapfit]");
     if (!t) return;
+    if (t.hasAttribute("data-flytab")) { flyTab = t.getAttribute("data-flytab"); render(true); return; }
     if (t.hasAttribute("data-pkp")) { pkTap(t.getAttribute("data-pkp")); return; }
     if (t.hasAttribute("data-pkmove")) { pkMove(t.getAttribute("data-pkmove")); return; }
     if (t.hasAttribute("data-kchip")) {

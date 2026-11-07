@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Encrypt / decrypt the app's private content.
 
-  encrypt:  python3 tools/crypt.py encrypt PASSWORD src/data.js src/config.js > js/data.enc.js
+  encrypt:  python3 tools/crypt.py encrypt PASSWORD src/data.js src/config.js > js/data.enc.new && mv js/data.enc.new js/data.enc.js
+            (reuses the salt in js/data.enc.js when it exists, so phones that already
+             unlocked stay unlocked after an update; the IV is always fresh)
   decrypt:  python3 tools/crypt.py decrypt PASSWORD js/data.enc.js > content.js
 
 Format matches the browser side (js/gate.js): PBKDF2-SHA256 -> AES-256-GCM.
@@ -19,9 +21,17 @@ def key(pw, salt, it=ITER):
 
 def b64(b): return base64.b64encode(b).decode("ascii")
 
+def current_salt():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "js", "data.enc.js")
+    try:
+        blob = json.loads(re.search(r"window\.KXO_ENC\s*=\s*(\{.*\});", open(path, encoding="utf-8").read(), re.S).group(1))
+        return base64.b64decode(blob["salt"]) if blob.get("iter") == ITER else None
+    except Exception:
+        return None
+
 def encrypt(pw, paths):
     plain = "\n;\n".join(open(p, encoding="utf-8").read() for p in paths).encode("utf-8")
-    salt, iv = os.urandom(16), os.urandom(12)
+    salt, iv = current_salt() or os.urandom(16), os.urandom(12)
     ct = AESGCM(key(pw, salt)).encrypt(iv, plain, None)
     blob = {"v": 1, "iter": ITER, "salt": b64(salt), "iv": b64(iv), "ct": b64(ct)}
     return "/* Encrypted. Open the app and enter the family password. */\nwindow.KXO_ENC = " + json.dumps(blob) + ";\n"
