@@ -558,16 +558,42 @@ window.KXO_BOOT = function () {
     return null;
   }
   function newGame(a, b, ph, ord, court) { return { a: a, b: b, ph: ph, ord: ord, sa: 0, sb: 0, done: false, court: court }; }
+  /* scorekeepers: one per game, never someone in that game; random, spread evenly; swappable */
+  function pkPool(g) {
+    var seen = {}, out = [];
+    pkPlayers().concat([].concat.apply([], tIds(g).map(function (id) { return g.teams[id].p; }))).forEach(function (n) { if (!seen[n]) { seen[n] = 1; out.push(n); } });
+    return out;
+  }
+  function inGame(g, x) { return x ? (((g.teams || {})[x.a] || {}).p || []).concat((((g.teams || {})[x.b] || {}).p) || []) : []; }
+  function refLoad(list) { var c = {}; list.forEach(function (x) { if (x.ref) c[x.ref] = (c[x.ref] || 0) + 1; }); return c; }
+  function pickRef(pool, avoid, soft, load) {
+    var ok = pool.filter(function (n) { return avoid.indexOf(n) < 0; }), pref = ok.filter(function (n) { return soft.indexOf(n) < 0; }), c = pref.length ? pref : ok;
+    if (!c.length) return "";
+    var min = Math.min.apply(null, c.map(function (n) { return load[n] || 0; })), pick = shuffle(c.filter(function (n) { return (load[n] || 0) === min; }))[0];
+    load[pick] = (load[pick] || 0) + 1;
+    return pick;
+  }
+  // When a game goes on court: its scorekeeper can't be playing on the other court, and the other
+  // court's scorekeeper can't be playing in this game. Reassign either one if needed.
+  function refFix(g, list, x, up) {
+    var other = list.filter(function (y) { return y.court && !y.done && y.key !== x.key; })[0], load = refLoad(list), pool = pkPool(g);
+    var busyX = inGame(g, x).concat(inGame(g, other));
+    if (!x.ref || busyX.indexOf(x.ref) >= 0) { if (x.ref) load[x.ref]--; x.ref = pickRef(pool, busyX, [], load); up["sched/" + x.key + "/ref"] = x.ref; }
+    if (other && other.ref && inGame(g, x).indexOf(other.ref) >= 0) { load[other.ref]--; other.ref = pickRef(pool, busyX.concat([x.ref]), [], load); up["sched/" + other.key + "/ref"] = other.ref; }
+  }
   function phaseUpdates(g, list, up) {
     var T = tIds(g).length, maxOrd = list.reduce(function (m, x) { return Math.max(m, x.ord); }, 0);
     var pool = list.filter(function (x) { return x.ph === "pool"; }), semis = list.filter(function (x) { return x.ph === "semi"; }), fin = list.filter(function (x) { return x.ph === "final"; });
     if (pool.length && pool.every(function (x) { return x.done; }) && !semis.length && !fin.length) {
       var gg = { teams: g.teams, sched: {} }; list.forEach(function (x) { gg.sched[x.key] = x; });
       var seeds = standings(gg).map(function (s) { return s.id; });
-      if (T >= 4) { up["sched/s1"] = newGame(seeds[0], seeds[3], "semi", maxOrd + 1, "c1"); up["sched/s2"] = newGame(seeds[1], seeds[2], "semi", maxOrd + 2, "c2"); }
-      else if (T === 3) up["sched/f"] = newGame(seeds[0], seeds[1], "final", maxOrd + 1, "c1");
+      if (T >= 4) {
+        var s1 = newGame(seeds[0], seeds[3], "semi", maxOrd + 1, "c1"), s2 = newGame(seeds[1], seeds[2], "semi", maxOrd + 2, "c2"), ld = refLoad(list), both = inGame(g, s1).concat(inGame(g, s2));
+        s1.ref = pickRef(pkPool(g), both, [], ld); s2.ref = pickRef(pkPool(g), both.concat([s1.ref]), [], ld);
+        up["sched/s1"] = s1; up["sched/s2"] = s2;
+      } else if (T === 3) { var f3 = newGame(seeds[0], seeds[1], "final", maxOrd + 1, "c1"); f3.ref = pickRef(pkPool(g), inGame(g, f3), [], refLoad(list)); up["sched/f"] = f3; }
     }
-    if (semis.length === 2 && semis.every(function (x) { return x.done; }) && !fin.length) up["sched/f"] = newGame(winner(semis[0]), winner(semis[1]), "final", maxOrd + 1, "c1");
+    if (semis.length === 2 && semis.every(function (x) { return x.done; }) && !fin.length) { var fz = newGame(winner(semis[0]), winner(semis[1]), "final", maxOrd + 1, "c1"); fz.ref = pickRef(pkPool(g), inGame(g, fz), [], refLoad(list)); up["sched/f"] = fz; }
   }
   var PH = { pool: "Pool play", semi: "Semifinal", final: "Final" };
   function courtHtml(g, x, label, big) {
@@ -582,7 +608,17 @@ window.KXO_BOOT = function () {
       if (!done) foot = '<div class="court-foot"><span class="muted small">To 11, win by 2</span><button class="joinbtn small" data-pk="done" data-key="' + x.key + '" data-court="' + esc(x.court || "") + '"' + (sa === sb ? " disabled" : "") + ">Game over</button></div>";
       else foot = '<div class="court-foot"><span class="status tag ok">Final ' + Math.max(sa, sb) + "–" + Math.min(sa, sb) + '</span><button class="linkbtn" data-pk="fix" data-key="' + x.key + '">' + (edit ? "Done fixing" : "Fix score") + "</button></div>";
     }
-    return '<div class="court' + (big ? " big" : "") + (x.ph === "final" ? " final" : "") + '"><div class="court-h">' + esc(label) + " · " + PH[x.ph] + "</div>" + side(x.a, sa, "sa", sa > sb) + '<div class="vs">vs</div>' + side(x.b, sb, "sb", sb > sa) + foot + "</div>";
+    return '<div class="court' + (big ? " big" : "") + (x.ph === "final" ? " final" : "") + '"><div class="court-h">' + esc(label) + " · " + PH[x.ph] + "</div>" + side(x.a, sa, "sa", sa > sb) + '<div class="vs">vs</div>' + side(x.b, sb, "sb", sb > sa) + refHtml(g, x, !big && !done) + foot + "</div>";
+  }
+  function refHtml(g, x, canEdit) {
+    var who = x.ref || "", mine = !!ME && who === ME;
+    if (!canEdit) return who ? '<div class="pk-ref' + (mine ? " me" : "") + '">Scorekeeper <b>' + esc(who) + "</b></div>" : "";
+    var out = inGame(g, x);
+    if (x.court) pkList(g.sched).forEach(function (y) { if (y.court && !y.done && y.key !== x.key) out = out.concat(inGame(g, y), y.ref ? [y.ref] : []); }); // busy on the other court right now
+    var opts = pkPool(g).filter(function (n) { return out.indexOf(n) < 0 || n === who; });
+    if (!opts.length) return '<div class="pk-ref muted">No one free, so the players keep score</div>';
+    return '<label class="pk-ref' + (mine ? " me" : "") + '"><span>' + (mine ? "You're keeping score" : "Scorekeeper") + '</span><select data-pkref="' + x.key + '" aria-label="Scorekeeper for this game">' +
+      (who ? "" : '<option value="">Pick someone</option>') + opts.map(function (n) { return "<option" + (n === who ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("") + "</select></label>";
   }
   function champHtml(team) {
     return '<div class="champ"><div class="kicker">Pickleball champions</div><div class="champ-names">' + names(team) + '</div><div class="muted small">Bragging rights until next Thanksgiving.</div></div>';
@@ -657,7 +693,7 @@ window.KXO_BOOT = function () {
     var g = pkGame(), L = pkList(g.sched), ids = tIds(g), players = pkPlayers(), champs = pkChamps(g), open = pkOpen();
     var h = '<div class="view-anim"><div class="day-head"><div class="kicker">Fri, Nov 27 · Picklewood · Indoor 6 + 7</div><h2 class="headline">Pickleball Tournament</h2></div>';
     if (champs) h += champHtml(champs);
-    h += '<div class="pk-rules"><b>Doubles all the way.</b> Teams of two are drawn at random (with an odd number, one team of three rotates in). Pool play, then the top 4 teams play semifinals and a final. Games to 11, win by 2. The whole thing fits in about 2 hours. Running behind? Play to 9.</div>';
+    h += '<div class="pk-rules"><b>Doubles all the way.</b> Teams of two are drawn at random (with an odd number, one team of three rotates in). Pool play, then the top 4 teams play semifinals and a final. Games to 11, win by 2. Every game gets a scorekeeper who isn\'t playing, picked at random (tap the name to swap). The whole thing fits in about 2 hours. Running behind? Play to 9.</div>';
     if (!live()) return h + '<div class="soon-box">The tournament opens when sign-ups are live.</div></div>';
 
     if (!ids.length) {
@@ -684,7 +720,7 @@ window.KXO_BOOT = function () {
           return x ? courtHtml(g, x, c[1]) : '<div class="court idle"><div class="court-h">' + c[1] + '</div><span class="muted small">Free</span></div>';
         }).join("");
         var nextUp = L.filter(function (x) { return !x.done && !x.court; }).slice(0, 4);
-        if (nextUp.length) h += '<h3 class="sec-head">Up next</h3><ol class="pk-next">' + nextUp.map(function (x) { return "<li>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + "</li>"; }).join("") + "</ol>";
+        if (nextUp.length) h += '<h3 class="sec-head">Up next</h3><ol class="pk-next">' + nextUp.map(function (x) { return "<li><div>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + "</div>" + refHtml(g, x, true) + "</li>"; }).join("") + "</ol>";
       }
       h += '<div class="map-tools"><button class="maplink" data-go="pickle-tv">Show on the TV</button></div>';
       h += '<h3 class="sec-head">Standings</h3>' + standingsHtml(g);
@@ -700,7 +736,7 @@ window.KXO_BOOT = function () {
     else if (L.length) {
       main = COURTS.map(function (c) { var x = L.filter(function (y) { return y.court === c[0] && !y.done; })[0]; return x ? courtHtml(g, x, c[1], true) : ""; }).join("");
       var nx = L.filter(function (x) { return !x.done && !x.court; }).slice(0, 3);
-      if (nx.length) main += '<div class="kicker" style="margin-top:2vh">Up next</div><ol class="pk-next">' + nx.map(function (x) { return "<li>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + "</li>"; }).join("") + "</ol>";
+      if (nx.length) main += '<div class="kicker" style="margin-top:2vh">Up next</div><ol class="pk-next">' + nx.map(function (x) { return "<li>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + (x.ref ? ' <span class="muted small">· score: ' + esc(x.ref) + "</span>" : "") + "</li>"; }).join("") + "</ol>";
       main += '<div class="pk-pace">' + esc(pkPace(g)) + "</div>";
     } else if (tIds(g).length) main = '<div class="kicker">Teams</div><div class="pk-teams">' + tIds(g).map(function (id, i) { return '<div class="pk-team"><span class="n">' + (i + 1) + "</span>" + tName(g, id) + "</div>"; }).join("") + "</div>";
     else main = '<p class="tv-note">The tournament starts soon.</p>';
@@ -711,6 +747,8 @@ window.KXO_BOOT = function () {
     var g = pkGame(), L = pkList(g.sched), ch = pkChamps(g);
     if (ch) return '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball champions</span><b>' + names(ch) + "</b></button>";
     if (!L.length) return "";
+    var mine = ME && L.filter(function (x) { return !x.done && x.ref === ME; })[0];
+    if (mine) { var ct = (COURTS.filter(function (c) { return c[0] === mine.court; })[0] || [])[1]; return '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball · you\'re scorekeeper</span><b>' + (ct ? "Now, on " + ct : "Coming up soon") + "</b><span>" + tName(g, mine.a) + " vs " + tName(g, mine.b) + " →</span></button>"; }
     var ph = L.some(function (x) { return x.ph === "final"; }) ? "The final is on" : L.some(function (x) { return x.ph === "semi"; }) ? "Semifinals are on" : "Pool play in progress";
     return '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball tournament</span><b>' + ph + "</b><span>Courts, scores + standings →</span></button>";
   }
@@ -730,15 +768,20 @@ window.KXO_BOOT = function () {
       pkSel = null;
       var plan = pkPlan(ids), sched = {};
       plan.list.forEach(function (m, i) { sched["g" + (i < 9 ? "0" : "") + (i + 1)] = newGame(m[0], m[1], "pool", i + 1, ""); });
-      var list = pkList(sched);
-      COURTS.forEach(function (c) { var x = nextFor(list, c[0]); if (x) { x.court = c[0]; sched[x.key].court = c[0]; } });
+      var list = pkList(sched), pool = pkPool(g), load = {};
+      list.forEach(function (x, i) { // random + even; softly avoid players in the neighbouring games (likely on the other court)
+        var soft = inGame(g, list[i - 1]).concat(inGame(g, list[i + 1]));
+        x.ref = sched[x.key].ref = pickRef(pool, inGame(g, x), soft, load);
+      });
+      COURTS.forEach(function (c) { var x = nextFor(list, c[0]); if (x) { x.court = c[0]; refFix(g, list, x, {}); } });
+      list.forEach(function (x) { sched[x.key].court = x.court; sched[x.key].ref = x.ref; });
       up.sched = sched; up.startedAt = Date.now(); up.est = plan.mins;
     }
     else if (act === "done") {
       var court = btn.getAttribute("data-court"), list2 = pkList(g.sched);
       up["sched/" + key + "/done"] = true;
       list2.forEach(function (x) { if (x.key === key) x.done = true; });
-      if (court) { var nx = nextFor(list2, court); if (nx) { up["sched/" + nx.key + "/court"] = court; nx.court = court; } }
+      if (court) { var nx = nextFor(list2, court); if (nx) { up["sched/" + nx.key + "/court"] = court; nx.court = court; refFix(g, list2, nx, up); } }
       phaseUpdates(g, list2, up);
     }
     else if (act === "reset") {
@@ -1323,6 +1366,11 @@ window.KXO_BOOT = function () {
       try { navigator.clipboard.writeText(addr).then(function () { msg.textContent = "Address copied."; }, function () { msg.textContent = "Couldn't copy. Press and hold the address to copy it."; }); }
       catch (err) { msg.textContent = "Couldn't copy. Press and hold the address to copy it."; }
     }
+  });
+  document.addEventListener("change", function (e) {
+    var sel = e.target.closest && e.target.closest("[data-pkref]"); if (!sel || !sel.value) return;
+    var up = {}; up["sched/" + sel.getAttribute("data-pkref") + "/ref"] = sel.value;
+    Cloud.gameUpdate(PK, up).then(function () { toast(sel.value + " is keeping score."); }, function () { toast("Couldn't save that. Check your connection."); });
   });
   document.addEventListener("input", function (e) {
     if (e.target.id === "kq") { kp.q = e.target.value; kSave(); kRefreshResults(); }

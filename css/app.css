@@ -506,3 +506,12 @@ body.locked > *:not(.gate) { display: none !important; }
 .menu .cook.open { color: var(--muted); font-weight: 600; font-style: italic; }
 .menu-go { margin-top: 10px; }
 .fap.right { left: 16px; top: 50%; transform: translateY(-50%); justify-items: start; }
+/* pickleball scorekeepers */
+.pk-ref { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); padding: 6px 0 2px; }
+.pk-ref b { color: var(--text); }
+.pk-ref select { appearance: none; -webkit-appearance: none; font: 700 14px var(--body); color: var(--text); background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a9b5ae' stroke-width='1.6' fill='none'/%3E%3C/svg%3E") no-repeat right 10px center; border: 1px solid var(--line); border-radius: 999px; padding: 6px 28px 6px 12px; max-width: 60%; }
+.pk-ref.me, .pk-ref.me span { color: var(--board); font-weight: 700; }
+.pk-ref.me select { border-color: var(--board); }
+.pk-next li { padding: 4px 0; }
+.pk-next .pk-ref { padding-top: 2px; }
+.court.big .pk-ref { font-size: clamp(14px, 1.4vw, 22px); }
