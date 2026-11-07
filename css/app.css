@@ -390,3 +390,16 @@ body.locked > *:not(.gate) { display: none !important; }
 .ptv-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 1.2s ease; }
 .ptv-img.on { opacity: 1; }
 .ptv-cap { font-weight: 700; color: var(--board); font-size: clamp(16px, 2vw, 28px); }
+
+/* pickleball v2 */
+.pk-teams { display: grid; gap: 6px; margin-top: 10px; }
+.pk-team { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; font-weight: 700; }
+.pk-team .n { width: 22px; height: 22px; border-radius: 50%; background: var(--raise); color: var(--muted); font-size: 12px; display: grid; place-items: center; flex: none; }
+.pk-team.mine { border-color: var(--ok); }
+.team.mine .tn::after { content: " · you"; color: var(--ok); font-size: 12px; font-weight: 700; }
+.court.idle { opacity: .6; }
+.court.final { border-color: var(--board); }
+.pk-pace { margin-top: 12px; font-size: 14px; font-weight: 700; color: var(--ok); }
+.pk-next { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 4px; font-weight: 600; }
+.pk-tv .pk-next { font-size: clamp(16px, 1.8vw, 28px); }
+.pk-tv .pk-teams { font-size: clamp(16px, 1.8vw, 28px); }

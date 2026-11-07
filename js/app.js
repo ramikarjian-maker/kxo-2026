@@ -335,9 +335,7 @@ window.KXO_BOOT = function () {
       ["Sign the pickleball waiver", "Everyone playing · Fri 11:00a", K.LINKS.pickleWaiver],
       ["Sign the escape room waiver", "The 6 players · Fri 8:00p", K.LINKS.escapeWaiver]
     ];
-    var pg = pkGame(), pr = pkRounds(pg), pch = pkChamps(pg), pkBanner = "";
-    if (pch) pkBanner = '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball champions</span><b>' + names(pch) + "</b></button>";
-    else if (pr.length) pkBanner = '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball tournament</span><b>' + (pg.final ? "The final is on" : "Round " + pr[pr.length - 1].n + " in progress") + "</b><span>Scores + leaderboard →</span></button>";
+    var pkBanner = pkBannerHtml();
     return '<div class="view-anim"><div class="now" id="nowcard">' + nowInner() + "</div>" + pkBanner + photoStripHtml() + myWeekHtml() +
       '<div class="hl-intro"><div class="kicker">The big picture</div><h2 class="headline">Five days, 14 of us, two turkeys.</h2></div>' +
       '<div class="hl-list">' + DAYS.map(function (d) {
@@ -466,152 +464,224 @@ window.KXO_BOOT = function () {
   function stopTv() { if (tvTimer) { clearInterval(tvTimer); tvTimer = null; } }
 
 
-  /* ---------- pickleball tournament ---------- */
-  var PK = "pickle", COURTS = ["Indoor 6", "Indoor 7"];
-  function pkGame() { return Cloud.game(PK) || {}; }
-  function pkRounds(g) { var r = g.rounds || {}; return Object.keys(r).map(function (k) { var x = r[k]; x.key = k; return x; }).sort(function (a, b) { return a.n - b.n; }); }
-  function pkCourts(r) { var c = r.courts || {}; return Object.keys(c).sort().map(function (k) { var x = c[k]; x.key = k; return x; }); }
+  /* ---------- pickleball tournament: doubles teams, pool play, semis, final ---------- */
+  var PK = "pickle", COURTS = [["c1", "Indoor 6"], ["c2", "Indoor 7"]], SLOT_MIN = 15, BUDGET_MIN = 135;
+  var pkResetArmed = false, pkResetTimer = null, pkEditing = {}, celebrated = {};
+  function pkGame() { var g = Cloud.game(PK); return g && g.v === 2 ? g : {}; }
   function pkPlayers() { return Cloud.who("pickle"); }
   function shuffle(a) { for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
-  function pkStats(g) {
-    var st = {};
-    function s(p) { return st[p] || (st[p] = { p: p, gp: 0, w: 0, l: 0, pf: 0, pa: 0, sat: 0, partners: {}, opps: {} }); }
-    pkPlayers().forEach(s);
-    pkRounds(g).forEach(function (r) {
-      (r.sit || []).forEach(function (p) { s(p).sat++; });
-      pkCourts(r).forEach(function (c) {
-        var A = c.a || [], B = c.b || [];
-        [[A, B], [B, A]].forEach(function (pair) {
-          pair[0].forEach(function (p) {
-            pair[0].forEach(function (q) { if (q !== p) s(p).partners[q] = (s(p).partners[q] || 0) + 1; });
-            pair[1].forEach(function (q) { s(p).opps[q] = (s(p).opps[q] || 0) + 1; });
-          });
-        });
-        if (!c.done) return;
-        var sa = +c.sa || 0, sb = +c.sb || 0;
-        A.forEach(function (p) { var x = s(p); x.gp++; x.pf += sa; x.pa += sb; if (sa > sb) x.w++; else x.l++; });
-        B.forEach(function (p) { var x = s(p); x.gp++; x.pf += sb; x.pa += sa; if (sb > sa) x.w++; else x.l++; });
-      });
-    });
-    return st;
-  }
-  function pkTable(st) {
-    return Object.keys(st).map(function (k) { return st[k]; }).sort(function (a, b) {
-      return (b.w - a.w) || ((b.pf - b.pa) - (a.pf - a.pa)) || (b.pf - a.pf) || (a.gp - b.gp) || a.p.localeCompare(b.p);
-    });
-  }
-  function pkMakeRound(g, n) {
-    var players = pkPlayers(), courts = Math.min(COURTS.length, Math.floor(players.length / 4));
-    if (!courts) return null;
-    var prior = { rounds: {} };
-    pkRounds(g).forEach(function (r) { if (r.n < n) prior.rounds[r.key] = r; });
-    var st = pkStats(prior), need = courts * 4;
-    var order = shuffle(players.slice()).sort(function (x, y) { return (st[x].gp - st[y].gp) || (st[y].sat - st[x].sat); });
-    var playing = order.slice(0, need), sit = order.slice(need);
-    function rate(p) { var x = st[p]; return x.gp ? x.w / x.gp : 0.5; }
-    var best = null, bestCost = Infinity;
-    for (var tries = 0; tries < 400; tries++) {
-      var pl = shuffle(playing.slice()), cost = 0;
-      for (var c = 0; c < courts; c++) {
-        var A = pl.slice(c * 4, c * 4 + 2), B = pl.slice(c * 4 + 2, c * 4 + 4);
-        cost += 10 * ((st[A[0]].partners[A[1]] || 0) + (st[B[0]].partners[B[1]] || 0));
-        A.forEach(function (p) { B.forEach(function (q) { cost += 2 * (st[p].opps[q] || 0); }); });
-        cost += 3 * Math.abs(rate(A[0]) + rate(A[1]) - rate(B[0]) - rate(B[1]));
-      }
-      if (cost < bestCost) { bestCost = cost; best = pl; }
-    }
-    var round = { n: n, courts: {}, sit: sit };
-    for (var k = 0; k < courts; k++) round.courts["c" + (k + 1)] = { a: best.slice(k * 4, k * 4 + 2), b: best.slice(k * 4 + 2, k * 4 + 4), sa: 0, sb: 0, done: false };
-    return round;
-  }
-  function pkChamps(g) { var f = g.final; if (!f || !f.done) return null; return (+f.sa > +f.sb) ? f.a : f.b; }
-  function pkOpen() { return live() && (today() >= "2026-11-27" || Cloud.state.mode === "mock" || !!OVERRIDE); }
-  function getPath(o, path) { return path.split("/").reduce(function (x, k) { return x == null ? x : x[k]; }, o); }
   function names(a) { return (a || []).map(esc).join(" + "); }
-
-  function courtHtml(c, label, path, big) {
-    var sa = +c.sa || 0, sb = +c.sb || 0, done = !!c.done;
-    function side(team, score, key, win) {
-      return '<div class="team' + (done && win ? " win" : "") + '"><div class="tn">' + names(team) + "</div>" +
-        (done ? '<div class="score fixed">' + score + "</div>"
-          : '<div class="score"><button class="stp" data-pk="dec" data-path="' + path + "/" + key + '" aria-label="Minus one">−</button><span>' + score + '</span><button class="stp" data-pk="inc" data-path="' + path + "/" + key + '" aria-label="Plus one">+</button></div>') + "</div>";
+  function getPath(o, path) { return path.split("/").reduce(function (x, k) { return x == null ? x : x[k]; }, o); }
+  function pkOpen() { return live() && (today() >= "2026-11-27" || Cloud.state.mode === "mock" || !!OVERRIDE); }
+  function tIds(g) { return Object.keys(g.teams || {}).sort(function (x, y) { return +x.slice(1) - +y.slice(1); }); }
+  function tName(g, id) { var t = (g.teams || {})[id]; return t ? names(t.p) : "TBD"; }
+  function hasMe(g, id) { var t = (g.teams || {})[id]; return !!(ME && t && t.p.indexOf(ME) >= 0); }
+  function pkList(sched) {
+    var s = sched || {};
+    return Object.keys(s).map(function (k) { var x = {}; for (var f in s[k]) x[f] = s[k][f]; x.key = k; return x; }).sort(function (a, b) { return a.ord - b.ord; });
+  }
+  function pkDraw(players) {
+    var p = shuffle(players.slice()), teams = {}, n = Math.floor(p.length / 2);
+    for (var i = 0; i < n; i++) teams["t" + (i + 1)] = { p: [p[2 * i], p[2 * i + 1]] };
+    if (p.length % 2 && n) teams["t" + n].p.push(p[p.length - 1]); // odd number: one team of three rotates
+    return teams;
+  }
+  function circleRounds(ids) {
+    var t = ids.slice(); if (t.length % 2) t.push(null);
+    var n = t.length, rounds = [];
+    for (var r = 0; r < n - 1; r++) {
+      var rnd = [];
+      for (var i = 0; i < n / 2; i++) { var a = t[i], b = t[n - 1 - i]; if (a && b) rnd.push(r % 2 ? [b, a] : [a, b]); }
+      rounds.push(rnd);
+      t.splice(1, 0, t.pop());
     }
-    var foot = done
-      ? '<div class="court-foot"><span class="status tag ok">Final ' + Math.max(sa, sb) + "–" + Math.min(sa, sb) + '</span><button class="linkbtn" data-pk="edit" data-path="' + path + '">Fix score</button></div>'
-      : '<div class="court-foot"><span class="muted small">To 11, win by 2</span><button class="joinbtn small" data-pk="done" data-path="' + path + '"' + (sa === sb ? " disabled" : "") + ">Game over</button></div>";
-    return '<div class="court' + (big ? " big" : "") + '"><div class="court-h">' + esc(label) + "</div>" + side(c.a, sa, "sa", sa > sb) + '<div class="vs">vs</div>' + side(c.b, sb, "sb", sb > sa) + (big ? "" : foot) + "</div>";
+    return rounds;
+  }
+  function slotsFor(pairs) { // greedy packing onto 2 courts, no team twice in a slot
+    var q = pairs.slice(), slots = 0;
+    while (q.length) {
+      var used = {}, n = 0, i = 0;
+      while (i < q.length && n < 2) { var g = q[i]; if (!used[g[0]] && !used[g[1]]) { used[g[0]] = used[g[1]] = 1; q.splice(i, 1); n++; } else i++; }
+      slots++;
+    }
+    return slots;
+  }
+  function poSlots(T) { return T >= 4 ? 2 : T === 3 ? 1 : 0; }
+  function pkPlan(ids) {
+    var T = ids.length, base = circleRounds(ids), maxC = T <= 3 ? 3 : 2, rounds = [], best = null;
+    for (var c = 0; c < maxC; c++) base.forEach(function (r) { rounds.push(c % 2 ? r.map(function (m) { return [m[1], m[0]]; }) : r); });
+    for (var R = 1; R <= rounds.length; R++) {
+      var list = [].concat.apply([], rounds.slice(0, R)), mins = (slotsFor(list) + poSlots(T)) * SLOT_MIN;
+      if (!best || mins <= BUDGET_MIN) best = { list: list, mins: mins };
+      if (mins > BUDGET_MIN) break;
+    }
+    return best;
+  }
+  function perTeam(pairs) {
+    var c = {}; pairs.forEach(function (m) { c[m[0]] = (c[m[0]] || 0) + 1; c[m[1]] = (c[m[1]] || 0) + 1; });
+    var v = Object.keys(c).map(function (k) { return c[k]; }); if (!v.length) return "0";
+    var lo = Math.min.apply(null, v), hi = Math.max.apply(null, v); return lo === hi ? String(lo) : lo + "–" + hi;
+  }
+  function dur(m) { var h = Math.floor(m / 60), r = m % 60; return (h ? h + "h" : "") + (r ? (h ? " " : "") + r + "m" : ""); }
+  function standings(g) {
+    var st = {}; tIds(g).forEach(function (id) { st[id] = { id: id, gp: 0, w: 0, l: 0, pf: 0, pa: 0 }; });
+    pkList(g.sched).forEach(function (x) {
+      if (x.ph !== "pool" || !x.done) return;
+      var A = st[x.a], B = st[x.b]; if (!A || !B) return;
+      var sa = +x.sa || 0, sb = +x.sb || 0;
+      A.gp++; B.gp++; A.pf += sa; A.pa += sb; B.pf += sb; B.pa += sa;
+      if (sa > sb) { A.w++; B.l++; } else { B.w++; A.l++; }
+    });
+    return Object.keys(st).map(function (k) { return st[k]; }).sort(function (a, b) {
+      var ra = a.gp ? a.w / a.gp : 0, rb = b.gp ? b.w / b.gp : 0;
+      return (rb - ra) || ((b.pf - b.pa) - (a.pf - a.pa)) || (b.pf - a.pf) || (+a.id.slice(1) - +b.id.slice(1));
+    });
+  }
+  function winner(x) { return (+x.sa > +x.sb) ? x.a : x.b; }
+  function pkChampTeam(g) {
+    var L = pkList(g.sched); if (!L.length) return null;
+    var f = L.filter(function (x) { return x.ph === "final"; })[0];
+    if (f) return f.done ? winner(f) : null;
+    if (tIds(g).length === 2 && L.every(function (x) { return x.done; })) return standings(g)[0].id;
+    return null;
+  }
+  function pkChamps(g) { var id = pkChampTeam(g); return id ? g.teams[id].p : null; }
+  function nextFor(list, court) {
+    var busy = {};
+    list.forEach(function (x) { if (x.court && !x.done && x.court !== court) { busy[x.a] = 1; busy[x.b] = 1; } });
+    for (var i = 0; i < list.length; i++) { var x = list[i]; if (!x.done && !x.court && !busy[x.a] && !busy[x.b]) return x; }
+    return null;
+  }
+  function newGame(a, b, ph, ord, court) { return { a: a, b: b, ph: ph, ord: ord, sa: 0, sb: 0, done: false, court: court }; }
+  function phaseUpdates(g, list, up) {
+    var T = tIds(g).length, maxOrd = list.reduce(function (m, x) { return Math.max(m, x.ord); }, 0);
+    var pool = list.filter(function (x) { return x.ph === "pool"; }), semis = list.filter(function (x) { return x.ph === "semi"; }), fin = list.filter(function (x) { return x.ph === "final"; });
+    if (pool.length && pool.every(function (x) { return x.done; }) && !semis.length && !fin.length) {
+      var gg = { teams: g.teams, sched: {} }; list.forEach(function (x) { gg.sched[x.key] = x; });
+      var seeds = standings(gg).map(function (s) { return s.id; });
+      if (T >= 4) { up["sched/s1"] = newGame(seeds[0], seeds[3], "semi", maxOrd + 1, "c1"); up["sched/s2"] = newGame(seeds[1], seeds[2], "semi", maxOrd + 2, "c2"); }
+      else if (T === 3) up["sched/f"] = newGame(seeds[0], seeds[1], "final", maxOrd + 1, "c1");
+    }
+    if (semis.length === 2 && semis.every(function (x) { return x.done; }) && !fin.length) up["sched/f"] = newGame(winner(semis[0]), winner(semis[1]), "final", maxOrd + 1, "c1");
+  }
+  var PH = { pool: "Pool play", semi: "Semifinal", final: "Final" };
+  function courtHtml(g, x, label, big) {
+    var sa = +x.sa || 0, sb = +x.sb || 0, done = !!x.done, edit = !!pkEditing[x.key], live = !done || edit;
+    function side(id, score, key, win) {
+      return '<div class="team' + (done && win ? " win" : "") + (hasMe(g, id) ? " mine" : "") + '"><div class="tn">' + tName(g, id) + "</div>" +
+        (!live || big ? '<div class="score fixed">' + score + "</div>"
+          : '<div class="score"><button class="stp" data-pk="dec" data-path="sched/' + x.key + "/" + key + '" aria-label="Minus one">−</button><span>' + score + '</span><button class="stp" data-pk="inc" data-path="sched/' + x.key + "/" + key + '" aria-label="Plus one">+</button></div>') + "</div>";
+    }
+    var foot = "";
+    if (!big) {
+      if (!done) foot = '<div class="court-foot"><span class="muted small">To 11, win by 2</span><button class="joinbtn small" data-pk="done" data-key="' + x.key + '" data-court="' + esc(x.court || "") + '"' + (sa === sb ? " disabled" : "") + ">Game over</button></div>";
+      else foot = '<div class="court-foot"><span class="status tag ok">Final ' + Math.max(sa, sb) + "–" + Math.min(sa, sb) + '</span><button class="linkbtn" data-pk="fix" data-key="' + x.key + '">' + (edit ? "Done fixing" : "Fix score") + "</button></div>";
+    }
+    return '<div class="court' + (big ? " big" : "") + (x.ph === "final" ? " final" : "") + '"><div class="court-h">' + esc(label) + " · " + PH[x.ph] + "</div>" + side(x.a, sa, "sa", sa > sb) + '<div class="vs">vs</div>' + side(x.b, sb, "sb", sb > sa) + foot + "</div>";
   }
   function champHtml(team) {
     return '<div class="champ"><div class="kicker">Pickleball champions</div><div class="champ-names">' + names(team) + '</div><div class="muted small">Bragging rights until next Thanksgiving.</div></div>';
   }
-  function boardTableHtml(rows, limit) {
-    var list = rows.filter(function (r) { return r.gp > 0; }).slice(0, limit || 99);
-    if (!list.length) return '<p class="muted small">The leaderboard fills in after the first games.</p>';
-    return '<table class="lb"><thead><tr><th>#</th><th>Player</th><th>W–L</th><th>+/−</th></tr></thead><tbody>' + list.map(function (r, i) {
+  function standingsHtml(g, limit) {
+    var rows = standings(g).slice(0, limit || 99);
+    if (!rows.length) return "";
+    var any = rows.some(function (r) { return r.gp; });
+    return '<table class="lb"><thead><tr><th>#</th><th>Team</th><th>W–L</th><th>+/−</th></tr></thead><tbody>' + rows.map(function (r, i) {
       var d = r.pf - r.pa;
-      return '<tr' + (r.p === ME ? ' class="me"' : "") + "><td>" + (i + 1) + "</td><td>" + esc(r.p) + "</td><td>" + r.w + "–" + r.l + "</td><td>" + (d > 0 ? "+" : "") + d + "</td></tr>";
-    }).join("") + "</tbody></table>";
+      return '<tr' + (hasMe(g, r.id) ? ' class="me"' : "") + "><td>" + (i + 1) + "</td><td>" + tName(g, r.id) + "</td><td>" + r.w + "–" + r.l + "</td><td>" + (any ? (d > 0 ? "+" : "") + d : "–") + "</td></tr>";
+    }).join("") + "</tbody></table>" + (tIds(g).length >= 4 ? '<p class="muted small">Top 4 after pool play go to the semifinals: #1 vs #4, #2 vs #3.</p>' : "");
+  }
+  function pkPace(g) {
+    var L = pkList(g.sched), T = tIds(g).length; if (!L.length || pkChampTeam(g)) return "";
+    var queued = L.filter(function (x) { return !x.done && !x.court && x.ph === "pool"; }).map(function (x) { return [x.a, x.b]; });
+    var hasSemi = L.some(function (x) { return x.ph === "semi"; }), hasFinal = L.some(function (x) { return x.ph === "final"; });
+    var po = hasFinal ? 0 : hasSemi ? 1 : poSlots(T), playing = L.some(function (x) { return x.court && !x.done; }) ? 0.5 : 0;
+    var mins = (slotsFor(queued) + po + playing) * SLOT_MIN;
+    return "On pace to finish around " + clock(new Date(now().getTime() + mins * 60000));
   }
   function pickleView() {
-    var g = pkGame(), rounds = pkRounds(g), cur = rounds[rounds.length - 1], players = pkPlayers(), champs = pkChamps(g);
-    var table = pkTable(pkStats(g)), open = pkOpen();
-    var h = '<div class="view-anim"><div class="day-head"><div class="kicker">Fri, Nov 27 · Picklewood · Indoor courts 6 + 7</div><h2 class="headline">Pickleball Tournament</h2></div>';
+    var g = pkGame(), L = pkList(g.sched), ids = tIds(g), players = pkPlayers(), champs = pkChamps(g), open = pkOpen();
+    var h = '<div class="view-anim"><div class="day-head"><div class="kicker">Fri, Nov 27 · Picklewood · Indoor 6 + 7</div><h2 class="headline">Pickleball Tournament</h2></div>';
     if (champs) h += champHtml(champs);
-    h += '<div class="pk-rules">Every round you get <b>a new partner and new opponents</b>. Games to 11, win by 2. Wins, then point difference, set the leaderboard. The top 4 play the final: <b>#1 + #4 vs #2 + #3</b>.</div>';
-    h += '<div class="sec" style="margin-top:14px"><div class="who-top"><span class="sec-label">Players</span><span class="cap">' + players.length + "</span></div>" + whoHtml("pickle", true) + "</div>";
+    h += '<div class="pk-rules"><b>Doubles all the way.</b> Teams of two are drawn at random (with an odd number, one team of three rotates in). Pool play, then the top 4 teams play semifinals and a final. Games to 11, win by 2. The whole thing fits in about 2 hours. Running behind? Play to 9.</div>';
     if (!live()) return h + '<div class="soon-box">The tournament opens when sign-ups are live.</div></div>';
-    var allDone = !cur || pkCourts(cur).every(function (c) { return c.done; });
-    var untouched = cur && pkCourts(cur).every(function (c) { return !c.done && !(+c.sa) && !(+c.sb); });
-    var controls = [];
-    if (!g.final) {
-      if (open && players.length >= 4 && allDone) controls.push('<button class="btn-todo" data-pk="next">' + (cur ? "Start round " + (cur.n + 1) : "Start round 1") + "</button>");
-      if (open && untouched) controls.push('<button class="maplink" data-pk="reshuffle">Reshuffle this round</button>');
-      if (open && allDone && rounds.length >= 2 && table.filter(function (r) { return r.gp > 0; }).length >= 4) controls.push('<button class="maplink" data-pk="final">Start the final</button>');
+
+    if (!ids.length) {
+      h += '<div class="sec" style="margin-top:14px"><div class="who-top"><span class="sec-label">Players</span><span class="cap">' + players.length + "</span></div>" + whoHtml("pickle", true) + "</div>";
+      if (players.length >= 4) { var est = pkPlan(Array.apply(null, Array(Math.floor(players.length / 2))).map(function (_, i) { return "t" + (i + 1); })); h += '<p class="muted small">' + Math.floor(players.length / 2) + " teams · each plays " + perTeam(est.list) + " pool games · about " + dur(est.mins) + " total</p>"; }
+      if (!open) h += '<div class="teaser">Teams get drawn at the courts on Friday.</div>';
+      else if (players.length < 4) h += '<div class="teaser">Need at least 4 players. ' + players.length + " signed up so far.</div>";
+      else h += '<div class="map-tools"><button class="btn-todo" data-pk="draw">Draw teams</button></div>';
+      return h + "</div>";
     }
-    controls.push('<button class="maplink" data-go="pickle-tv">Show on the TV</button>');
-    if (!open) h += '<div class="teaser">The courts open Friday. Rounds start once at least 4 people have signed up.</div>';
-    else if (players.length < 4) h += '<div class="teaser">Need at least 4 players to start. ' + players.length + " signed up so far.</div>";
-    if (g.final) {
-      h += '<div class="sec-head">The final</div>' + courtHtml(g.final, COURTS[0], "final");
-    } else if (cur) {
-      h += '<h3 class="sec-head">Round ' + cur.n + "</h3>" + pkCourts(cur).map(function (c, i) { return courtHtml(c, COURTS[i] || "Court " + (i + 1), "rounds/" + cur.key + "/courts/" + c.key); }).join("");
-      if (cur.sit && cur.sit.length) h += '<p class="muted small">Sitting out: ' + cur.sit.map(esc).join(", ") + "</p>";
+
+    h += '<h3 class="sec-head">Teams</h3><div class="pk-teams">' + ids.map(function (id, i) { return '<div class="pk-team' + (hasMe(g, id) ? " mine" : "") + '"><span class="n">' + (i + 1) + "</span>" + tName(g, id) + "</div>"; }).join("") + "</div>";
+    var late = players.filter(function (p) { return !ids.some(function (id) { return g.teams[id].p.indexOf(p) >= 0; }); });
+    if (late.length) h += '<p class="muted small">Signed up after the draw: ' + late.map(esc).join(", ") + ". Redraw before the first game to include them.</p>";
+
+    if (!L.length) {
+      var plan = pkPlan(ids);
+      h += '<p class="muted small" style="margin-top:10px">' + ids.length + " teams · each plays " + perTeam(plan.list) + " pool games · about " + dur(plan.mins) + " including the playoffs</p>";
+      h += '<div class="map-tools">' + (open ? '<button class="btn-todo" data-pk="start">Start the tournament</button><button class="maplink" data-pk="draw">Redraw teams</button>' : "") + '<button class="maplink" data-go="pickle-tv">Show on the TV</button></div>';
+    } else {
+      if (!champs) {
+        h += '<div class="pk-pace">' + esc(pkPace(g)) + "</div>";
+        h += COURTS.map(function (c) {
+          var x = L.filter(function (y) { return y.court === c[0] && !y.done; })[0];
+          return x ? courtHtml(g, x, c[1]) : '<div class="court idle"><div class="court-h">' + c[1] + '</div><span class="muted small">Free</span></div>';
+        }).join("");
+        var nextUp = L.filter(function (x) { return !x.done && !x.court; }).slice(0, 4);
+        if (nextUp.length) h += '<h3 class="sec-head">Up next</h3><ol class="pk-next">' + nextUp.map(function (x) { return "<li>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + "</li>"; }).join("") + "</ol>";
+      }
+      h += '<div class="map-tools"><button class="maplink" data-go="pickle-tv">Show on the TV</button></div>';
+      h += '<h3 class="sec-head">Standings</h3>' + standingsHtml(g);
+      var done = L.filter(function (x) { return x.done; }).reverse();
+      if (done.length) h += '<details class="pk-past"' + (champs ? " open" : "") + "><summary>Results (" + done.length + ")</summary>" + done.map(function (x) { return courtHtml(g, x, (COURTS.filter(function (c) { return c[0] === x.court; })[0] || ["", "Court"])[1]); }).join("") + "</details>";
     }
-    h += '<div class="map-tools">' + controls.join("") + "</div>";
-    h += '<h3 class="sec-head">Leaderboard</h3>' + boardTableHtml(table);
-    var past = rounds.filter(function (r) { return r !== cur || g.final; });
-    if (past.length) {
-      h += '<details class="pk-past"><summary>Earlier rounds</summary>' + past.slice().reverse().map(function (r) {
-        return '<div class="pk-pr"><b>Round ' + r.n + "</b>" + pkCourts(r).map(function (c) { return "<div>" + names(c.a) + " <b>" + (+c.sa || 0) + "–" + (+c.sb || 0) + "</b> " + names(c.b) + "</div>"; }).join("") + "</div>";
-      }).join("") + "</details>";
-    }
-    if (rounds.length) h += '<div style="margin-top:22px"><button class="linkbtn" data-pk="reset">' + (pkResetArmed ? "Tap again to erase the whole tournament" : "Start the tournament over") + "</button></div>";
+    h += '<div style="margin-top:22px"><button class="linkbtn" data-pk="reset">' + (pkResetArmed ? "Tap again to erase the tournament" : "Start the tournament over") + "</button></div>";
     return h + "</div>";
   }
   function pickleTvView() {
-    var g = pkGame(), rounds = pkRounds(g), cur = rounds[rounds.length - 1], champs = pkChamps(g), table = pkTable(pkStats(g));
-    var main;
+    var g = pkGame(), L = pkList(g.sched), champs = pkChamps(g), main;
     if (champs) main = '<div class="tv-champ">' + champHtml(champs) + "</div>";
-    else if (g.final) main = '<div class="kicker">The final</div>' + courtHtml(g.final, COURTS[0], "final", true);
-    else if (cur) main = '<div class="kicker">Round ' + cur.n + "</div>" + pkCourts(cur).map(function (c, i) { return courtHtml(c, COURTS[i], "", true); }).join("");
+    else if (L.length) {
+      main = COURTS.map(function (c) { var x = L.filter(function (y) { return y.court === c[0] && !y.done; })[0]; return x ? courtHtml(g, x, c[1], true) : ""; }).join("");
+      var nx = L.filter(function (x) { return !x.done && !x.court; }).slice(0, 3);
+      if (nx.length) main += '<div class="kicker" style="margin-top:2vh">Up next</div><ol class="pk-next">' + nx.map(function (x) { return "<li>" + tName(g, x.a) + ' <span class="muted">vs</span> ' + tName(g, x.b) + "</li>"; }).join("") + "</ol>";
+      main += '<div class="pk-pace">' + esc(pkPace(g)) + "</div>";
+    } else if (tIds(g).length) main = '<div class="kicker">Teams</div><div class="pk-teams">' + tIds(g).map(function (id, i) { return '<div class="pk-team"><span class="n">' + (i + 1) + "</span>" + tName(g, id) + "</div>"; }).join("") + "</div>";
     else main = '<p class="tv-note">The tournament starts soon.</p>';
     return '<div class="tv pk-tv"><div class="tv-top"><span class="tv-brand">Pickleball Tournament</span><button class="maplink" data-go="pickle">Exit</button></div>' +
-      '<div class="pk-tv-grid"><div class="pk-tv-main">' + main + '</div><div class="pk-tv-side"><div class="kicker">Leaderboard</div>' + boardTableHtml(table, 10) + "</div></div></div>";
+      '<div class="pk-tv-grid"><div class="pk-tv-main">' + main + '</div><div class="pk-tv-side"><div class="kicker">Standings</div>' + standingsHtml(g, 8) + "</div></div></div>";
   }
-  var pkResetArmed = false, pkResetTimer = null, celebrated = {};
+  function pkBannerHtml() {
+    var g = pkGame(), L = pkList(g.sched), ch = pkChamps(g);
+    if (ch) return '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball champions</span><b>' + names(ch) + "</b></button>";
+    if (!L.length) return "";
+    var ph = L.some(function (x) { return x.ph === "final"; }) ? "The final is on" : L.some(function (x) { return x.ph === "semi"; }) ? "Semifinals are on" : "Pool play in progress";
+    return '<button class="pk-banner" data-go="pickle"><span class="kicker">Pickleball tournament</span><b>' + ph + "</b><span>Courts, scores + standings →</span></button>";
+  }
   function pkAction(btn) {
-    var act = btn.getAttribute("data-pk"), path = btn.getAttribute("data-path"), g = pkGame(), up = {};
+    var act = btn.getAttribute("data-pk"), g = pkGame(), up = {}, path = btn.getAttribute("data-path"), key = btn.getAttribute("data-key");
     if (act === "inc" || act === "dec") { var v = +getPath(g, path) || 0; up[path] = Math.max(0, Math.min(40, v + (act === "inc" ? 1 : -1))); }
-    else if (act === "done") up[path + "/done"] = true;
-    else if (act === "edit") up[path + "/done"] = false;
-    else if (act === "next" || act === "reshuffle") {
-      var rounds = pkRounds(g), n = act === "next" ? rounds.length + 1 : rounds[rounds.length - 1].n;
-      var r = pkMakeRound(g, n); if (!r) { toast("Need at least 4 players."); return; }
-      up["rounds/r" + n] = r;
+    else if (act === "fix") { pkEditing[key] = !pkEditing[key]; render(true); return; }
+    else if (act === "draw") {
+      var pl = pkPlayers(); if (pl.length < 4) { toast("Need at least 4 players."); return; }
+      Cloud.gameSet(PK, { v: 2, teams: pkDraw(pl), at: Date.now() }).catch(function () { toast("Couldn't save that. Check your connection."); }); return;
     }
-    else if (act === "final") {
-      var t = pkTable(pkStats(g)).filter(function (r) { return r.gp > 0; });
-      up["final"] = { a: [t[0].p, t[3].p], b: [t[1].p, t[2].p], sa: 0, sb: 0, done: false };
+    else if (act === "start") {
+      var ids = tIds(g), plan = pkPlan(ids), sched = {};
+      plan.list.forEach(function (m, i) { sched["g" + (i < 9 ? "0" : "") + (i + 1)] = newGame(m[0], m[1], "pool", i + 1, ""); });
+      var list = pkList(sched);
+      COURTS.forEach(function (c) { var x = nextFor(list, c[0]); if (x) { x.court = c[0]; sched[x.key].court = c[0]; } });
+      up.sched = sched; up.startedAt = Date.now(); up.est = plan.mins;
+    }
+    else if (act === "done") {
+      var court = btn.getAttribute("data-court"), list2 = pkList(g.sched);
+      up["sched/" + key + "/done"] = true;
+      list2.forEach(function (x) { if (x.key === key) x.done = true; });
+      if (court) { var nx = nextFor(list2, court); if (nx) { up["sched/" + nx.key + "/court"] = court; nx.court = court; } }
+      phaseUpdates(g, list2, up);
     }
     else if (act === "reset") {
       if (!pkResetArmed) { pkResetArmed = true; clearTimeout(pkResetTimer); pkResetTimer = setTimeout(function () { pkResetArmed = false; render(true); }, 5000); render(true); return; }
@@ -634,7 +704,6 @@ window.KXO_BOOT = function () {
       if (Date.now() - t0 < 4000) requestAnimationFrame(frame); else cv.parentNode.removeChild(cv);
     })();
   }
-
 
   /* ---------- photo stream ---------- */
   var dayLblFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
