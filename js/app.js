@@ -63,6 +63,7 @@ window.KXO_BOOT = function () {
   try { ME = localStorage.getItem("kxo.me"); } catch (e) {}
   if (ALLNAMES.indexOf(ME) < 0) ME = null;
   function setMe(n) { ME = n; try { localStorage.setItem("kxo.me", n); } catch (e) {} updateMeChip(); }
+  (function () { var hc = document.getElementById("headcount"); if (hc) hc.textContent = ALLNAMES.length + " of us"; })();
   function updateMeChip() {
     var c = document.getElementById("mechip");
     c.textContent = ME ? "I'm " + ME : "Who are you?";
@@ -72,7 +73,8 @@ window.KXO_BOOT = function () {
   function who(act) {
     var a = ACTS[act];
     if (a && a.optout) { var out = Cloud.who(act + "-out"); return ALLNAMES.filter(function (n) { return out.indexOf(n) < 0; }); }
-    return Cloud.who(act);
+    // Only people still on the guest list: sign-ups from anyone removed later drop out everywhere.
+    return Cloud.who(act).filter(function (n) { return ALLNAMES.indexOf(n) >= 0; });
   }
   function joined(act, name) { return !!name && who(act).indexOf(name) >= 0; }
   function live() { return Cloud.state.mode === "firebase" || Cloud.state.mode === "mock"; }
@@ -360,7 +362,7 @@ window.KXO_BOOT = function () {
     ];
     var pkBanner = flyBannerHtml() + pkBannerHtml() + kBannerHtml();
     return '<div class="view-anim"><div class="now" id="nowcard">' + nowInner() + "</div>" + pkBanner + photoStripHtml() + myWeekHtml() +
-      '<div class="hl-intro"><div class="kicker">The big picture</div><h2 class="headline">Five days, 14 of us, two turkeys.</h2></div>' +
+      '<div class="hl-intro"><div class="kicker">The big picture</div><h2 class="headline">Five days, ' + ALLNAMES.length + ' of us, two turkeys.</h2></div>' +
       '<div class="hl-list">' + DAYS.map(function (d) {
         return '<button class="hl-card" data-go="' + d.id + '"><div class="hl-date"><span class="dow">' + d.dow + '</span><span class="num">' + d.num + '</span></div><div class="hl-body"><h3>' + esc(d.headline) + '</h3><ul class="moments">' +
           d.moments.map(function (m) { return "<li><b>" + esc(m[0]) + "</b>" + esc(m[1]) + "</li>"; }).join("") + '</ul><span class="hl-more">See the day →</span></div></button>';
